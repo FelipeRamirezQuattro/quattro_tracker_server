@@ -207,11 +207,45 @@ describe('client routes', () => {
     expect(unassignedRes.body.message).toBe('Client not found');
   });
 
+  it('scoped user cannot update detail of unassigned client', async () => {
+    const app = createApp(testEnv);
+    const passwordHash = await hashPassword('pw', 4);
+
+    // Create two clients
+    const assignedClient = await Client.create({ name: 'Assigned Client' });
+    const unassignedClient = await Client.create({ name: 'Unassigned Client' });
+
+    // Create a user assigned to only assignedClient
+    await User.create({
+      name: 'ScopedUser',
+      username: 'scoped',
+      passwordHash,
+      role: 'user',
+      assignedClientIds: [assignedClient._id],
+    });
+
+    const token = await loginAs(app, 'scoped', 'pw');
+
+    // User SHOULD be able to update their assigned client
+    const assignedRes = await request(app)
+      .put(`/api/clients/${assignedClient._id.toString()}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ name: 'Updated Assigned' });
+    expect(assignedRes.status).toBe(200);
+    expect(assignedRes.body.data.name).toBe('Updated Assigned');
+
+    // User should NOT be able to update unassigned client (404)
+    const unassignedRes = await request(app)
+      .put(`/api/clients/${unassignedClient._id.toString()}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ name: 'Updated Unassigned' });
+    expect(unassignedRes.status).toBe(404);
+    expect(unassignedRes.body.message).toBe('Client not found');
+  });
+
   it('user cannot mass-assign deletedAt to soft-delete via update', async () => {
     const app = createApp(testEnv);
     const passwordHash = await hashPassword('pw', 4);
-    await User.create({ name: 'User', username: 'user', passwordHash, role: 'user' });
-    const token = await loginAs(app, 'user', 'pw');
 
     // Create a client as admin
     const adminPasswordHash = await hashPassword('pw', 4);
@@ -223,6 +257,16 @@ describe('client routes', () => {
       .set('Authorization', `Bearer ${adminToken}`)
       .send({ name: 'Test Client' });
     const clientId = createRes.body.data._id;
+
+    // Create a user assigned to the client being updated
+    await User.create({
+      name: 'User',
+      username: 'user',
+      passwordHash,
+      role: 'user',
+      assignedClientIds: [clientId], // Assign user to this client
+    });
+    const token = await loginAs(app, 'user', 'pw');
 
     // User attempts to mass-assign deletedAt via update (should be stripped)
     const updateRes = await request(app)

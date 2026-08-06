@@ -41,7 +41,11 @@ export function createProjectsRouter(env: Env): Router {
 
   router.put('/:id', requireRole('admin', 'user'), async (req, res) => {
     try {
-      const project = await updateProject(String(req.params.id), req.body);
+      const project = await updateProject(req.authUser!, String(req.params.id), req.body);
+      if (!project) {
+        res.status(404).json({ success: false, message: 'Project not found' });
+        return;
+      }
       res.status(200).json({ success: true, data: project });
     } catch (err) {
       res.status(500).json({ success: false, message: 'Contact the system administrator.' });

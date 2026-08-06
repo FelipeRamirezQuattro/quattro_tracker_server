@@ -192,34 +192,97 @@ describe('project routes', () => {
     const app = createApp(testEnv);
     const client = await Client.create({ name: 'Test Co' });
     const passwordHash = await hashPassword('pw', 4);
-    await User.create({ name: 'User', username: 'user', passwordHash, role: 'user' });
+
+    // Create a project first
+    const project = await Project.create({
+      clientId: client._id,
+      name: 'Test Project',
+      status: 'active',
+    });
+
+    // Create a user assigned to this project
+    await User.create({
+      name: 'User',
+      username: 'user',
+      passwordHash,
+      role: 'user',
+      assignedProjectIds: [project._id],
+    });
     const token = await loginAs(app, 'user', 'pw');
 
-    // Create a project as admin
-    const adminPasswordHash = await hashPassword('pw', 4);
-    await User.create({ name: 'Admin', username: 'admin', passwordHash: adminPasswordHash, role: 'admin' });
-    const adminToken = await loginAs(app, 'admin', 'pw');
-
-    const createRes = await request(app)
-      .post('/api/projects')
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({ clientId: String(client._id), name: 'Test Project' });
-    const projectId = createRes.body.data._id;
-
-    // User attempts to mass-assign deletedAt via update (should be stripped)
+    // User attempts to mass-assign deletedAt via update (should be stripped, field is allowlisted away)
     const updateRes = await request(app)
-      .put(`/api/projects/${projectId}`)
+      .put(`/api/projects/${project._id}`)
       .set('Authorization', `Bearer ${token}`)
       .send({ name: 'Updated', deletedAt: new Date() });
     expect(updateRes.status).toBe(200);
 
-    // Verify deletedAt was NOT set (project is still active)
+    // Verify deletedAt was NOT set (project is still active, mass-assignment was stripped)
+    const adminPasswordHash = await hashPassword('pw', 4);
+    await User.create({ name: 'Admin', username: 'admin', passwordHash: adminPasswordHash, role: 'admin' });
+    const adminToken = await loginAs(app, 'admin', 'pw');
+
     const verifyRes = await request(app)
-      .get(`/api/projects/${projectId}`)
+      .get(`/api/projects/${project._id}`)
       .set('Authorization', `Bearer ${adminToken}`);
     expect(verifyRes.status).toBe(200);
     expect(verifyRes.body.data.deletedAt).toBeNull();
     expect(verifyRes.body.data.name).toBe('Updated');
+  });
+
+  it('scoped user cannot update unassigned project', async () => {
+    const app = createApp(testEnv);
+    const client = await Client.create({ name: 'Test Co' });
+    const passwordHash = await hashPassword('pw', 4);
+
+    // Create two projects: one assigned, one not
+    const assignedProject = await Project.create({
+      clientId: client._id,
+      name: 'Assigned Project',
+      status: 'active',
+    });
+    const unassignedProject = await Project.create({
+      clientId: client._id,
+      name: 'Unassigned Project',
+      status: 'active',
+    });
+
+    // Create a user assigned to only assignedProject
+    await User.create({
+      name: 'ScopedUser',
+      username: 'scoped',
+      passwordHash,
+      role: 'user',
+      assignedProjectIds: [assignedProject._id],
+    });
+    const token = await loginAs(app, 'scoped', 'pw');
+
+    // User SHOULD be able to update their assigned project
+    const assignedUpdateRes = await request(app)
+      .put(`/api/projects/${assignedProject._id.toString()}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ name: 'Assigned Updated' });
+    expect(assignedUpdateRes.status).toBe(200);
+    expect(assignedUpdateRes.body.data.name).toBe('Assigned Updated');
+
+    // User should NOT be able to update unassigned project (404, not silent write)
+    const unassignedUpdateRes = await request(app)
+      .put(`/api/projects/${unassignedProject._id.toString()}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ name: 'Should Not Update' });
+    expect(unassignedUpdateRes.status).toBe(404);
+    expect(unassignedUpdateRes.body.message).toBe('Project not found');
+
+    // Verify unassigned project was NOT updated
+    const adminPasswordHash = await hashPassword('pw', 4);
+    await User.create({ name: 'Admin', username: 'admin', passwordHash: adminPasswordHash, role: 'admin' });
+    const adminToken = await loginAs(app, 'admin', 'pw');
+
+    const verifyRes = await request(app)
+      .get(`/api/projects/${unassignedProject._id.toString()}`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(verifyRes.status).toBe(200);
+    expect(verifyRes.body.data.name).toBe('Unassigned Project'); // Name unchanged
   });
 
   it('nonexistent project returns 404', async () => {

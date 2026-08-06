@@ -41,7 +41,11 @@ export function createClientsRouter(env: Env): Router {
 
   router.put('/:id', requireRole('admin', 'user'), async (req, res) => {
     try {
-      const client = await updateClient(String(req.params.id), req.body);
+      const client = await updateClient(req.authUser!, String(req.params.id), req.body);
+      if (!client) {
+        res.status(404).json({ success: false, message: 'Client not found' });
+        return;
+      }
       res.status(200).json({ success: true, data: client });
     } catch (err) {
       res.status(500).json({ success: false, message: 'Contact the system administrator.' });

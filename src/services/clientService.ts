@@ -22,7 +22,7 @@ export async function createClient(data: { name: string; phone?: string; email?:
   return Client.create(data);
 }
 
-export async function updateClient(id: string, data: any) {
+export async function updateClient(user: AuthUser, id: string, data: any) {
   // Allowlist permitted fields only — strip deletedAt, _id, timestamps, etc.
   const { name, phone, email, billingAddress, active } = data;
   const allowlistedData: Partial<{ name: string; phone: string; email: string; billingAddress: string; active: boolean }> = {};
@@ -31,7 +31,16 @@ export async function updateClient(id: string, data: any) {
   if (email !== undefined) allowlistedData.email = email;
   if (billingAddress !== undefined) allowlistedData.billingAddress = billingAddress;
   if (active !== undefined) allowlistedData.active = active;
-  return Client.findByIdAndUpdate(id, allowlistedData, { returnDocument: 'after' });
+
+  // Use scoped query to ensure user can only update their assigned clients
+  try {
+    const objectId = new mongoose.Types.ObjectId(id);
+    const filter = scopeClientFilter(user, { _id: objectId });
+    return Client.findOneAndUpdate(filter, allowlistedData, { returnDocument: 'after' });
+  } catch {
+    // If id is not a valid ObjectId, return null
+    return null;
+  }
 }
 
 export async function deleteClient(id: string) {
