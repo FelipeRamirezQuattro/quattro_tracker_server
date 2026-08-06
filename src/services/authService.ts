@@ -59,10 +59,11 @@ export async function refresh({ rawRefreshToken, env }: RefreshParams): Promise<
   const now = new Date();
   const refreshExpiresAt = new Date(now.getTime() + env.refreshTokenExpiresInDays * 24 * 60 * 60 * 1000);
 
-  // Atomically claim the token: only succeed if token exists and is not yet revoked.
-  // This ensures only one concurrent refresh() call can claim the same token.
+  // Atomically claim the token: only succeed if token exists, is not yet revoked, and has not expired.
+  // This ensures only one concurrent refresh() call can claim the same token, and expired tokens
+  // are never mutated (preventing DoS where expired tokens could be replayed to revoke all sessions).
   const claimed = await RefreshToken.findOneAndUpdate(
-    { tokenHash, revokedAt: null },
+    { tokenHash, revokedAt: null, expiresAt: { $gt: now } },
     { revokedAt: now, replacedByTokenHash: newTokenHash },
     { returnDocument: 'before' }
   );
@@ -71,24 +72,26 @@ export async function refresh({ rawRefreshToken, env }: RefreshParams): Promise<
     // Atomic update found no matching document. Determine why:
     const existing = await RefreshToken.findOne({ tokenHash });
     if (!existing) {
-      // Token doesn't exist at all (unknown token)
+      // Case 1: Token doesn't exist at all (unknown token)
       throw new InvalidRefreshTokenError();
     }
-    // Token exists but revokedAt is already set: either it was already revoked,
-    // or a concurrent request just claimed it. Treat as reuse attack and revoke
-    // the entire chain for that user.
-    await RefreshToken.updateMany(
-      { userId: existing.userId, revokedAt: null },
-      { revokedAt: now }
-    );
+    // Token exists. Determine if it's revoked (Case 2) or expired (Case 3):
+    if (existing.revokedAt) {
+      // Case 2: Token exists but revokedAt is already set (genuine reuse or a race loser).
+      // Treat as reuse attack and revoke the entire chain for that user.
+      await RefreshToken.updateMany(
+        { userId: existing.userId, revokedAt: null },
+        { revokedAt: now }
+      );
+      throw new InvalidRefreshTokenError();
+    }
+    // Case 3: Token exists, revokedAt is null, but expiresAt is in the past.
+    // This is a benign expired token that was never touched. Reject without chain revocation.
     throw new InvalidRefreshTokenError();
   }
 
-  // Token successfully claimed. Validate it meets freshness requirements.
-  if (claimed.expiresAt.getTime() < Date.now()) {
-    throw new InvalidRefreshTokenError();
-  }
-
+  // Token successfully claimed. It passed all atomic checks (not revoked, not expired),
+  // so no need to re-check expiry here.
   const user = await User.findOne({ _id: claimed.userId, active: true });
   if (!user) throw new InvalidRefreshTokenError();
 
