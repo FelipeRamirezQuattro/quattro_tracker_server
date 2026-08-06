@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { Env } from '../config/env';
-import { login, refresh, logout } from '../services/authService';
+import { login, refresh, logout, changePassword } from '../services/authService';
 import { requireAuth } from '../middlewares/requireAuth';
 import { InvalidCredentialsError, InvalidRefreshTokenError } from '../helpers/errors';
 import { User } from '../db/models/User';
@@ -84,6 +84,20 @@ export function createAuthRouter(env: Env): Router {
       return;
     }
     res.status(200).json({ success: true, data: user });
+  });
+
+  router.put('/change-password', requireAuth(env), async (req, res) => {
+    try {
+      const { currentPassword, newPassword } = req.body;
+      await changePassword({ userId: req.authUser!.id, currentPassword, newPassword, env });
+      res.status(200).json({ success: true });
+    } catch (err) {
+      if (err instanceof InvalidCredentialsError) {
+        res.status(401).json({ success: false, message: 'Current password is incorrect' });
+        return;
+      }
+      res.status(500).json({ success: false, message: 'Contact the system administrator.' });
+    }
   });
 
   return router;
