@@ -5,6 +5,7 @@ import { Env } from './config/env';
 import { createAuthRouter } from './routes/auth';
 import { createClientsRouter } from './routes/clients';
 import { createProjectsRouter } from './routes/projects';
+import { createUsersRouter } from './routes/users';
 
 export function createApp(env: Env): express.Express {
   const app = express();
@@ -19,6 +20,7 @@ export function createApp(env: Env): express.Express {
   app.use('/api/auth', createAuthRouter(env));
   app.use('/api/clients', createClientsRouter(env));
   app.use('/api/projects', createProjectsRouter(env));
+  app.use('/api/users', createUsersRouter(env));
 
   return app;
 }
