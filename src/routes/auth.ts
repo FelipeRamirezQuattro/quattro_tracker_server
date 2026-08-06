@@ -1,8 +1,8 @@
 import { Router } from 'express';
 import { Env } from '../config/env';
-import { login, refresh, logout, changePassword } from '../services/authService';
+import { login, refresh, logout, changePassword, requestPasswordReset, confirmPasswordReset } from '../services/authService';
 import { requireAuth } from '../middlewares/requireAuth';
-import { InvalidCredentialsError, InvalidRefreshTokenError } from '../helpers/errors';
+import { InvalidCredentialsError, InvalidRefreshTokenError, InvalidResetTokenError } from '../helpers/errors';
 import { User } from '../db/models/User';
 
 const REFRESH_COOKIE_NAME = 'refreshToken';
@@ -94,6 +94,24 @@ export function createAuthRouter(env: Env): Router {
     } catch (err) {
       if (err instanceof InvalidCredentialsError) {
         res.status(401).json({ success: false, message: 'Current password is incorrect' });
+        return;
+      }
+      res.status(500).json({ success: false, message: 'Contact the system administrator.' });
+    }
+  });
+
+  router.post('/reset-password/request', async (req, res) => {
+    await requestPasswordReset({ usernameOrEmail: req.body.usernameOrEmail, env });
+    res.status(200).json({ success: true });
+  });
+
+  router.post('/reset-password/confirm', async (req, res) => {
+    try {
+      await confirmPasswordReset({ rawToken: req.body.token, newPassword: req.body.newPassword, env });
+      res.status(200).json({ success: true });
+    } catch (err) {
+      if (err instanceof InvalidResetTokenError) {
+        res.status(400).json({ success: false, message: 'Invalid or expired reset token' });
         return;
       }
       res.status(500).json({ success: false, message: 'Contact the system administrator.' });

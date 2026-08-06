@@ -1,10 +1,12 @@
 import { Env } from '../config/env';
 import { User } from '../db/models/User';
 import { RefreshToken } from '../db/models/RefreshToken';
+import { PasswordResetToken } from '../db/models/PasswordResetToken';
 import { hashPassword, verifyPassword } from '../helpers/password';
 import { generateOpaqueToken, hashToken } from '../helpers/tokens';
 import { signAccessToken } from '../helpers/jwt';
-import { InvalidCredentialsError, InvalidRefreshTokenError } from '../helpers/errors';
+import { InvalidCredentialsError, InvalidRefreshTokenError, InvalidResetTokenError } from '../helpers/errors';
+import { sendPasswordResetEmail } from './emailService';
 
 interface LoginParams {
   username: string;
@@ -137,6 +139,59 @@ export async function changePassword({
   user.passwordHash = await hashPassword(newPassword, env.bcryptCostFactor);
   user.tokenVersion += 1;
   await user.save();
+
+  await RefreshToken.updateMany({ userId: user._id, revokedAt: null }, { revokedAt: new Date() });
+}
+
+const PASSWORD_RESET_TOKEN_TTL_MS = 60 * 60 * 1000;
+
+export async function requestPasswordReset({
+  usernameOrEmail,
+  env,
+}: {
+  usernameOrEmail: string;
+  env: Env;
+}): Promise<void> {
+  const user = await User.findOne({
+    active: true,
+    $or: [{ username: usernameOrEmail }, { email: usernameOrEmail }],
+  });
+  if (!user || !user.email) return;
+
+  const rawToken = generateOpaqueToken();
+  await PasswordResetToken.create({
+    userId: user._id,
+    tokenHash: hashToken(rawToken),
+    expiresAt: new Date(Date.now() + PASSWORD_RESET_TOKEN_TTL_MS),
+  });
+
+  const resetLink = `https://app.example.com/reset-password?token=${rawToken}`;
+  await sendPasswordResetEmail({ to: user.email, resetLink, env });
+}
+
+export async function confirmPasswordReset({
+  rawToken,
+  newPassword,
+  env,
+}: {
+  rawToken: string;
+  newPassword: string;
+  env: Env;
+}): Promise<void> {
+  const tokenDoc = await PasswordResetToken.findOne({ tokenHash: hashToken(rawToken) });
+  if (!tokenDoc || tokenDoc.used || tokenDoc.expiresAt.getTime() < Date.now()) {
+    throw new InvalidResetTokenError();
+  }
+
+  const user = await User.findById(tokenDoc.userId);
+  if (!user) throw new InvalidResetTokenError();
+
+  user.passwordHash = await hashPassword(newPassword, env.bcryptCostFactor);
+  user.tokenVersion += 1;
+  await user.save();
+
+  tokenDoc.used = true;
+  await tokenDoc.save();
 
   await RefreshToken.updateMany({ userId: user._id, revokedAt: null }, { revokedAt: new Date() });
 }
