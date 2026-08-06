@@ -86,4 +86,31 @@ describe('epics routes', () => {
       .set('Authorization', auth);
     expect(res.status).toBe(404);
   });
+
+  it('hides an epic from a user scoped to a different project via the flat /api/epics/:id route', async () => {
+    const passwordHash = await hashPassword('x', 4);
+    const admin = await User.create({ name: 'Admin', username: 'admin', passwordHash, role: 'admin' });
+    const client = await Client.create({ name: 'Acme' });
+    const projectA = await Project.create({ clientId: client._id, name: 'Project A' });
+    const projectB = await Project.create({ clientId: client._id, name: 'Project B' });
+    const adminAuth = await authHeaderFor(admin);
+
+    const createRes = await request(app)
+      .post(`/api/projects/${projectA._id}/epics`)
+      .set('Authorization', adminAuth)
+      .send({ title: 'Launch' });
+    expect(createRes.status).toBe(201);
+    const epicId = createRes.body.data._id;
+
+    const scopedUser = await User.create({
+      name: 'Scoped', username: 'scoped', passwordHash, role: 'user',
+      assignedProjectIds: [projectB._id],
+    });
+    const scopedAuth = await authHeaderFor(scopedUser);
+
+    const res = await request(app)
+      .get(`/api/epics/${epicId}`)
+      .set('Authorization', scopedAuth);
+    expect(res.status).toBe(404);
+  });
 });

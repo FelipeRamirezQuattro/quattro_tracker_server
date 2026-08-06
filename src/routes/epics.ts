@@ -4,9 +4,13 @@ import { requireAuth } from '../middlewares/requireAuth';
 import { requireRole } from '../middlewares/requireRole';
 import { listEpics, getEpic, createEpic, updateEpic, deleteEpic } from '../services/epicService';
 
-export function createProjectEpicsRouter(env: Env): Router {
+// No requireAuth() here: this router is only ever mounted inside
+// createProjectsRouter (src/routes/projects.ts), which already runs
+// requireAuth(env) before delegating to '/:id/epics'. Re-running it here
+// would just re-verify the JWT and re-query the User collection for
+// every request with no additional benefit.
+export function createProjectEpicsRouter(): Router {
   const router = Router({ mergeParams: true });
-  router.use(requireAuth(env));
 
   router.get('/', requireRole('admin', 'user'), async (req, res) => {
     try {

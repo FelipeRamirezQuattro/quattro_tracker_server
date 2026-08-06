@@ -8,7 +8,7 @@ import { createProjectEpicsRouter } from './epics';
 export function createProjectsRouter(env: Env): Router {
   const router = Router();
   router.use(requireAuth(env));
-  router.use('/:id/epics', createProjectEpicsRouter(env));
+  router.use('/:id/epics', createProjectEpicsRouter());
 
   router.get('/', requireRole('admin', 'user', 'final_user'), async (req, res) => {
     try {
