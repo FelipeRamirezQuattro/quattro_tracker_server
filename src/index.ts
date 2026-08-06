@@ -1,11 +1,11 @@
 import 'dotenv/config';
-import mongoose from 'mongoose';
 import { createApp } from './app';
 import { loadEnv } from './config/env';
+import { connectDb } from './db/connect';
 
 async function main() {
   const env = loadEnv();
-  await mongoose.connect(env.mongoUri);
+  await connectDb(env.mongoUri);
   const app = createApp();
   app.listen(env.port, () => {
     console.log(`Listening on port ${env.port}`);
