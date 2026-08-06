@@ -173,29 +173,38 @@ describe('client routes', () => {
     expect(res.status).toBe(404);
   });
 
-  it('user with no assigned clients cannot access any client detail', async () => {
+  it('scoped user cannot access detail of unassigned client', async () => {
     const app = createApp(testEnv);
     const passwordHash = await hashPassword('pw', 4);
 
-    // Create a client
-    const client = await Client.create({ name: 'Some Client' });
+    // Create two clients
+    const assignedClient = await Client.create({ name: 'Assigned Client' });
+    const unassignedClient = await Client.create({ name: 'Unassigned Client' });
 
-    // Create a user (not admin) with NO assigned clients
+    // Create a user assigned to only assignedClient
     await User.create({
       name: 'ScopedUser',
       username: 'scoped',
       passwordHash,
       role: 'user',
-      assignedClientIds: [], // Empty assigned clients list
+      assignedClientIds: [assignedClient._id],
     });
 
     const token = await loginAs(app, 'scoped', 'pw');
 
-    // User should NOT access any client
-    const res = await request(app)
-      .get(`/api/clients/${client._id.toString()}`)
+    // User SHOULD access their assigned client
+    const assignedRes = await request(app)
+      .get(`/api/clients/${assignedClient._id.toString()}`)
       .set('Authorization', `Bearer ${token}`);
-    expect(res.status).toBe(404);
+    expect(assignedRes.status).toBe(200);
+    expect(assignedRes.body.data.name).toBe('Assigned Client');
+
+    // User should NOT access unassigned client (404, not the unassigned client's data)
+    const unassignedRes = await request(app)
+      .get(`/api/clients/${unassignedClient._id.toString()}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(unassignedRes.status).toBe(404);
+    expect(unassignedRes.body.message).toBe('Client not found');
   });
 
   it('user cannot mass-assign deletedAt to soft-delete via update', async () => {
