@@ -17,6 +17,15 @@ function refreshCookieOptions(env: Env) {
   };
 }
 
+function clearCookieOptions(env: Env) {
+  return {
+    httpOnly: true,
+    secure: env.nodeEnv === 'production',
+    sameSite: 'strict' as const,
+    path: '/api/auth',
+  };
+}
+
 export function createAuthRouter(env: Env): Router {
   const router = Router();
 
@@ -47,7 +56,7 @@ export function createAuthRouter(env: Env): Router {
       res.status(200).json({ success: true, data: { accessToken: result.accessToken } });
     } catch (err) {
       if (err instanceof InvalidRefreshTokenError) {
-        res.clearCookie(REFRESH_COOKIE_NAME, { path: '/api/auth' });
+        res.clearCookie(REFRESH_COOKIE_NAME, clearCookieOptions(env));
         res.status(401).json({ success: false, message: 'Invalid refresh token' });
         return;
       }
@@ -56,12 +65,16 @@ export function createAuthRouter(env: Env): Router {
   });
 
   router.post('/logout', async (req, res) => {
-    const rawRefreshToken = req.cookies?.[REFRESH_COOKIE_NAME];
-    if (rawRefreshToken) {
-      await logout({ rawRefreshToken });
+    try {
+      const rawRefreshToken = req.cookies?.[REFRESH_COOKIE_NAME];
+      if (rawRefreshToken) {
+        await logout({ rawRefreshToken });
+      }
+      res.clearCookie(REFRESH_COOKIE_NAME, clearCookieOptions(env));
+      res.status(200).json({ success: true });
+    } catch (err) {
+      res.status(500).json({ success: false, message: 'Contact the system administrator.' });
     }
-    res.clearCookie(REFRESH_COOKIE_NAME, { path: '/api/auth' });
-    res.status(200).json({ success: true });
   });
 
   router.get('/me', requireAuth(env), async (req, res) => {
