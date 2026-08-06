@@ -52,36 +52,50 @@ interface RefreshParams {
 
 export async function refresh({ rawRefreshToken, env }: RefreshParams): Promise<AuthTokens> {
   const tokenHash = hashToken(rawRefreshToken);
-  const existing = await RefreshToken.findOne({ tokenHash });
-  if (!existing) throw new InvalidRefreshTokenError();
 
-  if (existing.revokedAt) {
+  // Pre-compute new token before any database operations to minimize race window
+  const newRawToken = generateOpaqueToken();
+  const newTokenHash = hashToken(newRawToken);
+  const now = new Date();
+  const refreshExpiresAt = new Date(now.getTime() + env.refreshTokenExpiresInDays * 24 * 60 * 60 * 1000);
+
+  // Atomically claim the token: only succeed if token exists and is not yet revoked.
+  // This ensures only one concurrent refresh() call can claim the same token.
+  const claimed = await RefreshToken.findOneAndUpdate(
+    { tokenHash, revokedAt: null },
+    { revokedAt: now, replacedByTokenHash: newTokenHash },
+    { returnDocument: 'before' }
+  );
+
+  if (!claimed) {
+    // Atomic update found no matching document. Determine why:
+    const existing = await RefreshToken.findOne({ tokenHash });
+    if (!existing) {
+      // Token doesn't exist at all (unknown token)
+      throw new InvalidRefreshTokenError();
+    }
+    // Token exists but revokedAt is already set: either it was already revoked,
+    // or a concurrent request just claimed it. Treat as reuse attack and revoke
+    // the entire chain for that user.
     await RefreshToken.updateMany(
       { userId: existing.userId, revokedAt: null },
-      { revokedAt: new Date() }
+      { revokedAt: now }
     );
     throw new InvalidRefreshTokenError();
   }
 
-  if (existing.expiresAt.getTime() < Date.now()) {
+  // Token successfully claimed. Validate it meets freshness requirements.
+  if (claimed.expiresAt.getTime() < Date.now()) {
     throw new InvalidRefreshTokenError();
   }
 
-  const user = await User.findOne({ _id: existing.userId, active: true });
+  const user = await User.findOne({ _id: claimed.userId, active: true });
   if (!user) throw new InvalidRefreshTokenError();
 
-  const newRawToken = generateOpaqueToken();
-  const newTokenHash = hashToken(newRawToken);
-  const refreshExpiresAt = new Date(
-    Date.now() + env.refreshTokenExpiresInDays * 24 * 60 * 60 * 1000
-  );
-
+  // Create the new refresh token record.
   await RefreshToken.create({ userId: user._id, tokenHash: newTokenHash, expiresAt: refreshExpiresAt });
 
-  existing.revokedAt = new Date();
-  existing.replacedByTokenHash = newTokenHash;
-  await existing.save();
-
+  // Issue new access token.
   const accessToken = signAccessToken(
     { sub: String(user._id), role: user.role, tokenVersion: user.tokenVersion },
     env.jwtAccessSecret,
