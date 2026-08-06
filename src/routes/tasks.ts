@@ -3,6 +3,7 @@ import { Env } from '../config/env';
 import { requireAuth } from '../middlewares/requireAuth';
 import { requireRole } from '../middlewares/requireRole';
 import { listTasks, getTask, createTask, updateTask, deleteTask } from '../services/taskService';
+import { addSubtask, updateSubtask, deleteSubtask } from '../services/subtaskService';
 
 // This router is mounted flat at /api/tasks (not nested under
 // createProjectsRouter like the epic/sprint sub-routers), so nothing else
@@ -83,6 +84,45 @@ export function createTasksRouter(env: Env): Router {
         return;
       }
       res.status(200).json({ success: true });
+    } catch {
+      res.status(500).json({ success: false, message: 'Contact the system administrator.' });
+    }
+  });
+
+  router.post('/:id/subtasks', requireRole('admin', 'user'), async (req, res) => {
+    try {
+      const task = await addSubtask(req.authUser!, String(req.params.id), req.body);
+      if (!task) {
+        res.status(404).json({ success: false, message: 'Task not found' });
+        return;
+      }
+      res.status(201).json({ success: true, data: task });
+    } catch {
+      res.status(500).json({ success: false, message: 'Contact the system administrator.' });
+    }
+  });
+
+  router.put('/:id/subtasks/:subId', requireRole('admin', 'user'), async (req, res) => {
+    try {
+      const task = await updateSubtask(req.authUser!, String(req.params.id), String(req.params.subId), req.body);
+      if (!task) {
+        res.status(404).json({ success: false, message: 'Task or subtask not found' });
+        return;
+      }
+      res.status(200).json({ success: true, data: task });
+    } catch {
+      res.status(500).json({ success: false, message: 'Contact the system administrator.' });
+    }
+  });
+
+  router.delete('/:id/subtasks/:subId', requireRole('admin', 'user'), async (req, res) => {
+    try {
+      const task = await deleteSubtask(req.authUser!, String(req.params.id), String(req.params.subId));
+      if (!task) {
+        res.status(404).json({ success: false, message: 'Task or subtask not found' });
+        return;
+      }
+      res.status(200).json({ success: true, data: task });
     } catch {
       res.status(500).json({ success: false, message: 'Contact the system administrator.' });
     }
