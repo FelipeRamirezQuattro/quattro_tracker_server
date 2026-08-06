@@ -1,7 +1,7 @@
 import { Env } from '../config/env';
 import { User } from '../db/models/User';
 import { RefreshToken } from '../db/models/RefreshToken';
-import { verifyPassword } from '../helpers/password';
+import { hashPassword, verifyPassword } from '../helpers/password';
 import { generateOpaqueToken, hashToken } from '../helpers/tokens';
 import { signAccessToken } from '../helpers/jwt';
 import { InvalidCredentialsError, InvalidRefreshTokenError } from '../helpers/errors';
@@ -106,4 +106,37 @@ export async function refresh({ rawRefreshToken, env }: RefreshParams): Promise<
   );
 
   return { accessToken, refreshToken: newRawToken, refreshExpiresAt };
+}
+
+export async function logout({ rawRefreshToken }: { rawRefreshToken: string }): Promise<void> {
+  await RefreshToken.updateOne(
+    { tokenHash: hashToken(rawRefreshToken), revokedAt: null },
+    { revokedAt: new Date() }
+  );
+}
+
+interface ChangePasswordParams {
+  userId: string;
+  currentPassword: string;
+  newPassword: string;
+  env: Env;
+}
+
+export async function changePassword({
+  userId,
+  currentPassword,
+  newPassword,
+  env,
+}: ChangePasswordParams): Promise<void> {
+  const user = await User.findById(userId);
+  if (!user) throw new InvalidCredentialsError();
+
+  const valid = await verifyPassword(currentPassword, user.passwordHash);
+  if (!valid) throw new InvalidCredentialsError();
+
+  user.passwordHash = await hashPassword(newPassword, env.bcryptCostFactor);
+  user.tokenVersion += 1;
+  await user.save();
+
+  await RefreshToken.updateMany({ userId: user._id, revokedAt: null }, { revokedAt: new Date() });
 }
