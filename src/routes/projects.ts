@@ -4,11 +4,13 @@ import { requireAuth } from '../middlewares/requireAuth';
 import { requireRole } from '../middlewares/requireRole';
 import { listProjects, getProject, createProject, updateProject, deleteProject } from '../services/projectService';
 import { createProjectEpicsRouter } from './epics';
+import { createProjectSprintsRouter } from './sprints';
 
 export function createProjectsRouter(env: Env): Router {
   const router = Router();
   router.use(requireAuth(env));
   router.use('/:id/epics', createProjectEpicsRouter());
+  router.use('/:id/sprints', createProjectSprintsRouter());
 
   router.get('/', requireRole('admin', 'user', 'final_user'), async (req, res) => {
     try {
