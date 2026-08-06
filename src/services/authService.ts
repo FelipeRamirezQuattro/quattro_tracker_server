@@ -166,7 +166,14 @@ export async function requestPasswordReset({
   });
 
   const resetLink = `https://app.example.com/reset-password?token=${rawToken}`;
-  await sendPasswordResetEmail({ to: user.email, resetLink, env });
+
+  try {
+    await sendPasswordResetEmail({ to: user.email, resetLink, env });
+  } catch (err) {
+    // Log the error but don't propagate it; this function must always resolve
+    // successfully to avoid revealing whether the account exists (enumeration attack).
+    console.error(`Failed to send password reset email to ${user.email}:`, err);
+  }
 }
 
 export async function confirmPasswordReset({
@@ -178,20 +185,29 @@ export async function confirmPasswordReset({
   newPassword: string;
   env: Env;
 }): Promise<void> {
-  const tokenDoc = await PasswordResetToken.findOne({ tokenHash: hashToken(rawToken) });
-  if (!tokenDoc || tokenDoc.used || tokenDoc.expiresAt.getTime() < Date.now()) {
+  const tokenHash = hashToken(rawToken);
+  const now = new Date();
+
+  // Atomically claim the token: only succeed if token exists, is not yet used, and has not expired.
+  // This ensures only one concurrent confirmPasswordReset() call can claim the same token,
+  // preventing TOCTOU where two requests could both pass the "unused" check before either writes.
+  const claimed = await PasswordResetToken.findOneAndUpdate(
+    { tokenHash, used: false, expiresAt: { $gt: now } },
+    { used: true },
+    { returnDocument: 'before' }
+  );
+
+  if (!claimed) {
+    // Atomic update found no matching document. Token is unknown, already used, or expired.
     throw new InvalidResetTokenError();
   }
 
-  const user = await User.findById(tokenDoc.userId);
+  const user = await User.findById(claimed.userId);
   if (!user) throw new InvalidResetTokenError();
 
   user.passwordHash = await hashPassword(newPassword, env.bcryptCostFactor);
   user.tokenVersion += 1;
   await user.save();
-
-  tokenDoc.used = true;
-  await tokenDoc.save();
 
   await RefreshToken.updateMany({ userId: user._id, revokedAt: null }, { revokedAt: new Date() });
 }

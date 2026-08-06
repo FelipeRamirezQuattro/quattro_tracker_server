@@ -55,4 +55,30 @@ describe('password reset routes', () => {
       .send({ username: 'ada', password: 'brand-new-password' });
     expect(loginRes.status).toBe(200);
   });
+
+  it('request returns identical response for existing and non-existing users', async () => {
+    const app = createApp(testEnv);
+    await User.create({
+      name: 'Ada',
+      username: 'ada',
+      email: 'ada@example.com',
+      passwordHash: 'x',
+      role: 'admin',
+    });
+
+    // Request for existing user
+    const existingRes = await request(app)
+      .post('/api/auth/reset-password/request')
+      .send({ usernameOrEmail: 'ada@example.com' });
+
+    // Request for non-existing user
+    const nonExistingRes = await request(app)
+      .post('/api/auth/reset-password/request')
+      .send({ usernameOrEmail: 'nobody@example.com' });
+
+    // Both should have identical status and response body
+    expect(existingRes.status).toBe(200);
+    expect(nonExistingRes.status).toBe(200);
+    expect(existingRes.body).toEqual(nonExistingRes.body);
+  });
 });
