@@ -6,7 +6,7 @@ import { connectDb } from './db/connect';
 async function main() {
   const env = loadEnv();
   await connectDb(env.mongoUri);
-  const app = createApp();
+  const app = createApp(env);
   app.listen(env.port, () => {
     console.log(`Listening on port ${env.port}`);
   });
