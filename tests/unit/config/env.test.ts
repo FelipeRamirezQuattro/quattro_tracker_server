@@ -29,6 +29,7 @@ describe('loadEnv', () => {
   });
 
   it('throws when a required var is missing', () => {
+    // Set other required vars first since loadEnv() checks PORT before MONGODB_URI, so without them the error would be on PORT instead
     process.env.NODE_ENV = 'test';
     process.env.PORT = '4000';
     process.env.JWT_ACCESS_SECRET = 'secret';
