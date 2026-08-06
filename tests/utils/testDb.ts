@@ -6,6 +6,8 @@ let mongod: MongoMemoryServer;
 export async function connectTestDb(): Promise<void> {
   mongod = await MongoMemoryServer.create();
   await mongoose.connect(mongod.getUri());
+  // Ensure unique indices are created and enforced
+  await mongoose.connection.syncIndexes();
 }
 
 export async function clearTestDb(): Promise<void> {
