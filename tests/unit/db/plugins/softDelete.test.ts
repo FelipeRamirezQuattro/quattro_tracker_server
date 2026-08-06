@@ -27,4 +27,13 @@ describe('softDeletePlugin', () => {
     const results = await TestModel.find().setOptions({ includeDeleted: true });
     expect(results).toHaveLength(2);
   });
+
+  it('creates an index on the deletedAt field', () => {
+    const indexes = testSchema.indexes();
+    const deletedAtIndex = indexes.find(
+      (index) => Object.keys(index[0]).includes('deletedAt')
+    );
+    expect(deletedAtIndex).toBeDefined();
+    expect(deletedAtIndex![0]).toEqual({ deletedAt: 1 });
+  });
 });
