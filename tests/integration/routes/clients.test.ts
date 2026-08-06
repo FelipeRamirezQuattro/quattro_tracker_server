@@ -1,4 +1,5 @@
 import request from 'supertest';
+import mongoose from 'mongoose';
 import { connectTestDb, clearTestDb, closeTestDb } from '../../utils/testDb';
 import { createApp } from '../../../src/app';
 import { User } from '../../../src/db/models/User';
@@ -87,5 +88,146 @@ describe('client routes', () => {
       .set('Authorization', `Bearer ${token}`)
       .send({ name: 'New Co' });
     expect(res.status).toBe(403);
+  });
+
+  it('delete is soft-delete: record still exists with deletedAt set', async () => {
+    const app = createApp(testEnv);
+    const passwordHash = await hashPassword('pw', 4);
+    await User.create({ name: 'Admin', username: 'admin', passwordHash, role: 'admin' });
+    const token = await loginAs(app, 'admin', 'pw');
+
+    const createRes = await request(app)
+      .post('/api/clients')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ name: 'To Delete' });
+    const clientId = createRes.body.data._id;
+
+    // Delete the client (soft-delete)
+    await request(app)
+      .delete(`/api/clients/${clientId}`)
+      .set('Authorization', `Bearer ${token}`);
+
+    // Query with includeDeleted to verify it still exists with deletedAt set
+    const deletedClient = await Client.findById(clientId).setOptions({ includeDeleted: true });
+    expect(deletedClient).toBeDefined();
+    expect(deletedClient!.deletedAt).toBeDefined();
+    expect(deletedClient!.name).toBe('To Delete');
+  });
+
+  it('user can access detail of assigned client', async () => {
+    const app = createApp(testEnv);
+    const passwordHash = await hashPassword('pw', 4);
+    const visibleClient = await Client.create({ name: 'Visible Co' });
+    const adminPasswordHash = await hashPassword('pw', 4);
+    await User.create({ name: 'Admin', username: 'admin', passwordHash: adminPasswordHash, role: 'admin' });
+    const adminToken = await loginAs(app, 'admin', 'pw');
+
+    await User.create({
+      name: 'Contact',
+      username: 'contact',
+      passwordHash,
+      role: 'final_user',
+      assignedClientIds: [visibleClient._id],
+    });
+    const token = await loginAs(app, 'contact', 'pw');
+
+    // User should be able to access their assigned client
+    const res = await request(app)
+      .get(`/api/clients/${visibleClient._id}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.name).toBe('Visible Co');
+  });
+
+  it('admin can access detail of any client', async () => {
+    const app = createApp(testEnv);
+    const passwordHash = await hashPassword('pw', 4);
+    const client1 = await Client.create({ name: 'Client 1' });
+    const client2 = await Client.create({ name: 'Client 2' });
+    await User.create({ name: 'Admin', username: 'admin', passwordHash, role: 'admin' });
+    const token = await loginAs(app, 'admin', 'pw');
+
+    // Admin should be able to access any client
+    const res1 = await request(app)
+      .get(`/api/clients/${client1._id}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(res1.status).toBe(200);
+
+    const res2 = await request(app)
+      .get(`/api/clients/${client2._id}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(res2.status).toBe(200);
+  });
+
+  it('nonexistent client returns 404', async () => {
+    const app = createApp(testEnv);
+    const passwordHash = await hashPassword('pw', 4);
+    await User.create({ name: 'Admin', username: 'admin', passwordHash, role: 'admin' });
+    const token = await loginAs(app, 'admin', 'pw');
+
+    // Query for a nonexistent client ID
+    const fakeId = new mongoose.Types.ObjectId();
+    const res = await request(app)
+      .get(`/api/clients/${fakeId}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(404);
+  });
+
+  it('user with no assigned clients cannot access any client detail', async () => {
+    const app = createApp(testEnv);
+    const passwordHash = await hashPassword('pw', 4);
+
+    // Create a client
+    const client = await Client.create({ name: 'Some Client' });
+
+    // Create a user (not admin) with NO assigned clients
+    await User.create({
+      name: 'ScopedUser',
+      username: 'scoped',
+      passwordHash,
+      role: 'user',
+      assignedClientIds: [], // Empty assigned clients list
+    });
+
+    const token = await loginAs(app, 'scoped', 'pw');
+
+    // User should NOT access any client
+    const res = await request(app)
+      .get(`/api/clients/${client._id.toString()}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(404);
+  });
+
+  it('user cannot mass-assign deletedAt to soft-delete via update', async () => {
+    const app = createApp(testEnv);
+    const passwordHash = await hashPassword('pw', 4);
+    await User.create({ name: 'User', username: 'user', passwordHash, role: 'user' });
+    const token = await loginAs(app, 'user', 'pw');
+
+    // Create a client as admin
+    const adminPasswordHash = await hashPassword('pw', 4);
+    await User.create({ name: 'Admin', username: 'admin', passwordHash: adminPasswordHash, role: 'admin' });
+    const adminToken = await loginAs(app, 'admin', 'pw');
+
+    const createRes = await request(app)
+      .post('/api/clients')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ name: 'Test Client' });
+    const clientId = createRes.body.data._id;
+
+    // User attempts to mass-assign deletedAt via update (should be stripped)
+    const updateRes = await request(app)
+      .put(`/api/clients/${clientId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ name: 'Updated', deletedAt: new Date() });
+    expect(updateRes.status).toBe(200);
+
+    // Verify deletedAt was NOT set (client is still active)
+    const verifyRes = await request(app)
+      .get(`/api/clients/${clientId}`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(verifyRes.status).toBe(200);
+    expect(verifyRes.body.data.deletedAt).toBeNull();
+    expect(verifyRes.body.data.name).toBe('Updated');
   });
 });
