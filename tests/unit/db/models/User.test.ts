@@ -2,7 +2,10 @@ import { connectTestDb, clearTestDb, closeTestDb } from '../../../utils/testDb';
 import { User } from '../../../../src/db/models/User';
 
 describe('User model', () => {
-  beforeAll(connectTestDb);
+  beforeAll(async () => {
+    await connectTestDb();
+    await User.init();
+  });
   afterEach(clearTestDb);
   afterAll(closeTestDb);
 
