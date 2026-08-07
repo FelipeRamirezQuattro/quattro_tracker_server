@@ -52,4 +52,13 @@ describe('transitionTaskStatus', () => {
     const updated = await transitionTaskStatus(admin, String(task._id), 'in_review');
     expect(updated!.status).toBe('in_review');
   });
+
+  it('allows in_review -> in_progress as a reviewer-requests-changes move', async () => {
+    const projectId = new mongoose.Types.ObjectId();
+    const reporterId = new mongoose.Types.ObjectId();
+    const task = await Task.create({ projectId, title: 'X', reporterId, rank: 1000, status: 'in_review' });
+
+    const updated = await transitionTaskStatus(admin, String(task._id), 'in_progress');
+    expect(updated!.status).toBe('in_progress');
+  });
 });
