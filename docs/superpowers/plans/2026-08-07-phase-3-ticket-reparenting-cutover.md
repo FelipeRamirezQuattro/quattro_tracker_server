@@ -13,7 +13,7 @@
 - Every field, index, and scoping rule for `Ticket`/`Comment` must match `docs/plan/02-data-model.md` §2.2/§2.3 and `docs/plan/03-api-and-rbac.md` §3.1/§3.2 exactly. Fields: `clientId` (ObjectId ref Client, required, indexed), `projectId` (ObjectId ref Project, required, indexed), `subject` (String, required), `solved` (Boolean, required, default false, indexed), `comments` (embedded array, not a separate collection — "Ticket comment threads are bounded... always read together with their ticket"), `promotedTaskId` (ObjectId ref Task, nullable), `deletedAt`. Embedded `Comment`: `userId` (required), `comment` (required), `isAdmin` (default false, computed as `role !== 'final_user'` at write time), `attachmentKey` (nullable S3 key), `createdAt`. Indexes: `{clientId:1, projectId:1}`, `{projectId:1, solved:1}`.
 - **Referential integrity, enforced in the service layer, not the schema:** a Ticket's `projectId` must actually belong to its `clientId`. `createTicket` looks both documents up and rejects (returns `null` → 404) if `project.clientId !== clientId`.
 - **RBAC scoping for Ticket is role-dependent on which foreign key gates access** (`docs/plan/03-api-and-rbac.md` §3.2, Ticket row): `final_user` is scoped by `clientId ∈ assignedClientIds`; `user` (employee) is scoped by `projectId ∈ assignedProjectIds`; `admin` is unrestricted. This applies to **both listing/reading and creating** — a `final_user` can only create a ticket for a client in their `assignedClientIds`, and a `user` can only create one for a project in their `assignedProjectIds`. Do not reuse `clientService.getClient`/`projectService.getProject` for this validation (their scoping helpers apply the same rule to *any* non-admin, which is coincidentally correct for `user`'s project check but not precise enough to express the two-different-fields-per-role rule cleanly) — `ticketService.createTicket` does its own raw `Client`/`Project` existence + membership checks.
-- **Known contradiction in the source plan — resolved conservatively, flag before implementing:** `docs/plan/03-api-and-rbac.md` §3.2's Ticket row lists **Update: "Admin, User (status/comments on assigned projects)"** — no `final_user` — but the same row's scoping-rule column says "Final user: create/read/**reopen-close** only on `clientId ∈ assignedClientIds`," implying a final_user *can* toggle `solved`. This plan follows the explicit **Update** column (`PUT /api/tickets/:id` is `admin`+`user` only, no `final_user`) since it's the more specific of the two conflicting statements, and every other PUT route in this codebase is a flat `requireRole(...)` list with no per-role scope-shape switch inside the handler. **Confirm with the owner before Task 7** whether final_user-driven reopen/close is a real requirement; if so it needs its own route or a body-level restriction (e.g. final_user may only ever send `{solved: true}` on their own ticket), not a change to this plan's `PUT` role list alone.
+- **Resolved (owner decision): `final_user` can reopen/close their own ticket via `PUT`.** `docs/plan/03-api-and-rbac.md` §3.2's Ticket row lists Update as "Admin, User (status/comments on assigned projects)" with no `final_user`, but its scoping-rule column separately says "Final user: create/read/reopen-close only on `clientId ∈ assignedClientIds`." Decided: the scoping-rule column wins — `PUT /api/tickets/:id` is `admin`, `user`, **and** `final_user`. A `final_user` is still scoped by the existing `scopeTicketFilter` dispatcher (clientId ∈ assignedClientIds — "if they're the owner"), and a `user` by `scopeByProjectIdFilter` (projectId ∈ assignedProjectIds — "or assigned to it") exactly as it already works for every other verb. The one restriction unique to this role: a `final_user`'s `PUT` body may only toggle `solved` — a `subject` field is silently ignored for that role, not rejected, since "reopen/close" doesn't extend to relabeling the ticket. `admin`/`user` keep full `subject`+`solved` access as before.
 - **Weak-key fix:** any new S3 key this phase generates uses `crypto.randomUUID()` (`attachmentService.generateAttachmentKey`), never a `Math.random()`/`Date.now()`-based scheme like the legacy app's `generateRandomString()`.
 - **IDOR fix:** `GET /api/files/:attachmentId` takes a **Comment subdocument `_id`**, never a raw S3 key, and resolves it via `commentService.findAttachment(user, attachmentId)` — which reuses `scopeTicketFilter` to verify the caller can see the parent ticket — before ever calling S3. The raw S3 key is never returned to or accepted from the client in any response or request body.
 - **No legacy component reuse.** `src/components/pages/ticket/` (or wherever `TicketList`/`SupportForm`/`CommentForm`/`UploadInput` used to live) was deleted in commit `95447bb` along with the rest of the old Support module. `src/components/pages/` currently contains only `home/` and `login/`. Build the ticket UI fresh against this codebase's current AntD v5 + TanStack Query conventions (see `TaskDetailPage.tsx`/`TimesheetPage.tsx` for the patterns to follow) — an older planning doc (`docs/plan/04-frontend.md`) assumed those components would survive to be "modified," but that assumption predates the deletion and no longer holds.
@@ -261,7 +261,7 @@ Expected: PASS (3/3)
 
 **Interfaces:**
 - Consumes: `Ticket` (Task 1), `scopeByClientIdFilter` (Task 2), `scopeByProjectIdFilter` (Phase 1, already in `scope.ts`), `Client`/`Project` models (Phase 0).
-- Produces: `scopeTicketFilter(user: AuthUser, baseFilter?): Record<string, any>` — dispatches to `scopeByClientIdFilter` for `final_user`, `scopeByProjectIdFilter` for everyone else (admin is unrestricted inside either branch). `listTickets(user, filters)`, `getTicket(user, id)`, `createTicket(user, data)`, `updateTicket(user, id, data)`, `deleteTicket(id)` — same `null`-means-"not found or not yours" convention as every other service in this codebase.
+- Produces: `scopeTicketFilter(user: AuthUser, baseFilter?): Record<string, any>` — dispatches to `scopeByClientIdFilter` for `final_user`, `scopeByProjectIdFilter` for everyone else (admin is unrestricted inside either branch). `listTickets(user, filters)`, `getTicket(user, id)`, `createTicket(user, data)`, `updateTicket(user, id, data)`, `deleteTicket(id)` — same `null`-means-"not found or not yours" convention as every other service in this codebase. `updateTicket` allows a `final_user` to reopen/close their own ticket (toggle `solved` only, scoped by `scopeTicketFilter` same as any other verb) — see Global Constraints for why this differs from a plain admin/user-only PUT.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -370,7 +370,7 @@ describe('ticketService', () => {
     expect(results[0].subject).toBe('A ticket');
   });
 
-  it('allowlists only subject/solved on updateTicket', async () => {
+  it('allowlists subject/solved on updateTicket for an employee', async () => {
     const client = await Client.create({ name: 'Acme' });
     const project = await Project.create({ clientId: client._id, name: 'Website' });
     const ticket = await Ticket.create({ clientId: client._id, projectId: project._id, subject: 'Old' });
@@ -379,6 +379,26 @@ describe('ticketService', () => {
     const updated = await updateTicket(employee, String(ticket._id), { subject: 'New', solved: true });
     expect(updated!.subject).toBe('New');
     expect(updated!.solved).toBe(true);
+  });
+
+  it('lets a final_user reopen/close their own ticket, ignoring any subject change', async () => {
+    const client = await Client.create({ name: 'Acme' });
+    const project = await Project.create({ clientId: client._id, name: 'Website' });
+    const ticket = await Ticket.create({ clientId: client._id, projectId: project._id, subject: 'Old', solved: false });
+    const contact = authUserFor({ role: 'final_user', assignedClientIds: [String(client._id)] });
+
+    const updated = await updateTicket(contact, String(ticket._id), { subject: 'Hijacked subject', solved: true });
+    expect(updated!.solved).toBe(true);
+    expect(updated!.subject).toBe('Old');
+  });
+
+  it('blocks a final_user from updating a ticket outside their assignedClientIds', async () => {
+    const client = await Client.create({ name: 'Acme' });
+    const project = await Project.create({ clientId: client._id, name: 'Website' });
+    const ticket = await Ticket.create({ clientId: client._id, projectId: project._id, subject: 'X' });
+    const outsider = authUserFor({ role: 'final_user', assignedClientIds: [String(new mongoose.Types.ObjectId())] });
+
+    expect(await updateTicket(outsider, String(ticket._id), { solved: true })).toBeNull();
   });
 
   it('soft-deletes rather than removing the document', async () => {
@@ -479,16 +499,18 @@ export async function createTicket(
   });
 }
 
-// PUT is admin/user only (route-guarded) — final_user never reaches this, so
-// scopeTicketFilter's clientId branch is unreachable here in practice, but
-// calling the shared dispatcher (rather than scopeByProjectIdFilter directly)
-// keeps this in lockstep if that route guard ever changes.
+// PUT is admin/user/final_user (route-guarded) — a final_user may reopen/close
+// their own ticket ("if they're owner") the same way a user may on any ticket
+// within their assignedProjectIds ("or assigned to it"), via scopeTicketFilter's
+// existing per-role dispatch. The one restriction unique to final_user: they
+// may only ever toggle `solved` — a subject change is silently dropped, not
+// rejected, since "reopen/close" doesn't extend to relabeling the ticket.
 export async function updateTicket(user: AuthUser, id: string, data: { subject?: string; solved?: boolean }) {
   try {
     const objectId = new mongoose.Types.ObjectId(id);
     const filter = scopeTicketFilter(user, { _id: objectId });
     const allowlisted: Record<string, any> = {};
-    if (data.subject !== undefined) allowlisted.subject = data.subject;
+    if (data.subject !== undefined && user.role !== 'final_user') allowlisted.subject = data.subject;
     if (data.solved !== undefined) allowlisted.solved = data.solved;
     return await Ticket.findOneAndUpdate(filter, allowlisted, { returnDocument: 'after' });
   } catch {
@@ -510,7 +532,7 @@ export async function deleteTicket(id: string) {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npm test -- tests/integration/services/ticketService.test.ts`
-Expected: PASS (9/9)
+Expected: PASS (11/11)
 
 ---
 
@@ -960,7 +982,7 @@ Expected: PASS (4/4)
 
 **Interfaces:**
 - Consumes: `listTickets`/`getTicket`/`createTicket`/`updateTicket`/`deleteTicket` (Task 3), `addComment` (Task 4), `promoteTicket`/`AlreadyPromotedError` (Task 5), `generateAttachmentKey`/`uploadAttachment` (Task 6), `requireAuth`/`requireRole` (Phase 0).
-- Produces: `createTicketsRouter(env: Env): Router`, mounted flat at `/api/tickets`. Per-verb roles: GET (list/detail) and POST (create) and POST `/:id/comments` → `admin, user, final_user`; PUT and POST `/:id/promote` → `admin, user`; DELETE → `admin` only.
+- Produces: `createTicketsRouter(env: Env): Router`, mounted flat at `/api/tickets`. Per-verb roles: GET (list/detail), POST (create), PUT (update), and POST `/:id/comments` → `admin, user, final_user`; POST `/:id/promote` → `admin, user` only (a final_user's PUT access is reopen/close only, not promotion); DELETE → `admin` only.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1070,6 +1092,40 @@ describe('tickets routes', () => {
 
     const res = await request(app).delete(`/api/tickets/${ticket._id}`).set('Authorization', auth);
     expect(res.status).toBe(403);
+  });
+
+  it('lets a final_user reopen/close their own ticket via PUT, ignoring a subject change', async () => {
+    const passwordHash = await hashPassword('x', 4);
+    const client = await Client.create({ name: 'Acme' });
+    const project = await Project.create({ clientId: client._id, name: 'Website' });
+    const ticket = await Ticket.create({ clientId: client._id, projectId: project._id, subject: 'Old', solved: false });
+    const contact = await User.create({
+      name: 'Contact', username: 'contact', passwordHash, role: 'final_user', assignedClientIds: [client._id],
+    });
+    const auth = await authHeaderFor(contact);
+
+    const res = await request(app)
+      .put(`/api/tickets/${ticket._id}`)
+      .set('Authorization', auth)
+      .send({ subject: 'Hijacked subject', solved: true });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.solved).toBe(true);
+    expect(res.body.data.subject).toBe('Old');
+  });
+
+  it('404s a final_user attempting PUT on a ticket outside their assignedClientIds', async () => {
+    const passwordHash = await hashPassword('x', 4);
+    const client = await Client.create({ name: 'Acme' });
+    const project = await Project.create({ clientId: client._id, name: 'Website' });
+    const ticket = await Ticket.create({ clientId: client._id, projectId: project._id, subject: 'X' });
+    const outsiderContact = await User.create({
+      name: 'Outsider', username: 'outsider', passwordHash, role: 'final_user',
+    });
+    const auth = await authHeaderFor(outsiderContact);
+
+    const res = await request(app).put(`/api/tickets/${ticket._id}`).set('Authorization', auth).send({ solved: true });
+    expect(res.status).toBe(404);
   });
 
   it('adds a comment with an uploaded attachment and stores the generated key', async () => {
@@ -1182,9 +1238,11 @@ export function createTicketsRouter(env: Env): Router {
     }
   });
 
-  // Admin/user only — see Global Constraints for the source-plan contradiction
-  // around a final_user "reopen-close" ability that this route does not grant.
-  router.put('/:id', requireRole('admin', 'user'), async (req, res) => {
+  // final_user is allowed here — updateTicket restricts them to toggling
+  // `solved` only (reopen/close), scoped to their own client's tickets via
+  // scopeTicketFilter. See Global Constraints for the source-plan wording
+  // this decision resolves.
+  router.put('/:id', requireRole('admin', 'user', 'final_user'), async (req, res) => {
     try {
       const ticket = await updateTicket(req.authUser!, String(req.params.id), req.body);
       if (!ticket) {
@@ -1283,7 +1341,7 @@ app.use('/api/tickets', createTicketsRouter(env));
 - [ ] **Step 5: Run test to verify it passes**
 
 Run: `npm test -- tests/integration/routes/tickets.test.ts`
-Expected: PASS (6/6)
+Expected: PASS (8/8)
 
 ---
 
@@ -2185,7 +2243,7 @@ Expected: PASS (1/1)
 - Test: `quattro_support_client/src/pages/tickets/TicketDetailPage.test.tsx`
 
 **Interfaces:**
-- Consumes: `useTicket`, `useAddComment`, `usePromoteTicket`, `useDeleteTicket` (Task 11), `apiDownload` (Task 10).
+- Consumes: `useTicket`, `useUpdateTicket`, `useAddComment`, `usePromoteTicket`, `useDeleteTicket` (Task 11), `apiDownload` (Task 10).
 - Produces: `CommentThread` (comment list + textarea + antd `Upload` with `beforeUpload={() => false}` to capture the file without auto-uploading, wired to `useAddComment`; each comment with an `attachmentKey` gets a Download link that calls `apiDownload('files/' + comment._id)` — note the URL param is the **comment's `_id`**, matching the server's `routes/files.ts`, never `attachmentKey`), `TicketDetailPage` (header, `CommentThread`, admin/user-only "Promote to Task" button gated on `promotedTaskId == null`, admin-only Delete).
 
 - [ ] **Step 1: Write the failing test**
@@ -2265,6 +2323,28 @@ describe("TicketDetailPage", () => {
 
     await waitFor(() => expect(screen.getByText("X")).toBeInTheDocument());
     expect(screen.queryByText(/promote to task/i)).not.toBeInTheDocument();
+  });
+
+  it("shows a Close action for an open ticket, even for a final_user", async () => {
+    mockedApiRequest.mockResolvedValueOnce({
+      success: true,
+      data: { _id: "t1", clientId: "c1", projectId: "p1", subject: "X", solved: false, promotedTaskId: null, comments: [] },
+    });
+
+    renderWithProviders("final_user");
+
+    await waitFor(() => expect(screen.getByRole("button", { name: /^close$/i })).toBeInTheDocument());
+  });
+
+  it("shows a Reopen action for a solved ticket", async () => {
+    mockedApiRequest.mockResolvedValueOnce({
+      success: true,
+      data: { _id: "t1", clientId: "c1", projectId: "p1", subject: "X", solved: true, promotedTaskId: null, comments: [] },
+    });
+
+    renderWithProviders("final_user");
+
+    await waitFor(() => expect(screen.getByRole("button", { name: /^reopen$/i })).toBeInTheDocument());
   });
 });
 ```
@@ -2368,7 +2448,7 @@ import { useContext } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Card, Tag, Button, Space, message, Popconfirm } from "antd";
 import AuthContext from "../../context/AuthContext";
-import { useTicket, usePromoteTicket, useDeleteTicket } from "../../queries/tickets";
+import { useTicket, useUpdateTicket, usePromoteTicket, useDeleteTicket } from "../../queries/tickets";
 import { ApiError } from "../../hooks/apiRequest";
 import { DisplayComponent } from "../../navigation/layout/DisplayComponent";
 import { CommentThread } from "./CommentThread";
@@ -2379,10 +2459,23 @@ export const TicketDetailPage = () => {
   const navigate = useNavigate();
   const { userData, isAdmin } = useContext(AuthContext);
   const { data: ticket, isLoading, isError, error } = useTicket(id!);
+  const updateTicket = useUpdateTicket();
   const promoteTicket = usePromoteTicket(id!);
   const deleteTicket = useDeleteTicket();
 
   const canPromote = userData?.role !== "final_user" && !ticket?.promotedTaskId;
+
+  // Every role that can reach this page can PUT (admin/user on any ticket
+  // within scope, final_user on their own client's ticket) — updateTicket
+  // silently ignores a subject change for final_user, so this button only
+  // ever needs to send { solved }.
+  const handleToggleSolved = async () => {
+    try {
+      await updateTicket.mutateAsync({ id: id!, data: { solved: !ticket!.solved } });
+    } catch (err) {
+      message.error(err instanceof ApiError ? err.message : "Could not update the ticket");
+    }
+  };
 
   const handlePromote = async () => {
     try {
@@ -2410,6 +2503,9 @@ export const TicketDetailPage = () => {
           extra={
             <Space>
               <Tag color={ticket.solved ? "green" : "orange"}>{ticket.solved ? "Solved" : "Open"}</Tag>
+              <Button onClick={handleToggleSolved} loading={updateTicket.isPending}>
+                {ticket.solved ? "Reopen" : "Close"}
+              </Button>
               {canPromote && (
                 <Button onClick={handlePromote} loading={promoteTicket.isPending}>
                   Promote to Task
@@ -2434,7 +2530,7 @@ export const TicketDetailPage = () => {
 - [ ] **Step 5: Run test to verify it passes**
 
 Run: `npm test -- --watchAll=false --testPathPattern=TicketDetailPage`
-Expected: PASS (3/3)
+Expected: PASS (5/5)
 
 ---
 
