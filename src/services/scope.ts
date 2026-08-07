@@ -41,3 +41,12 @@ export function scopeOwnUserFilter(user: AuthUser, baseFilter: Record<string, an
   }
   return { ...baseFilter, ...scopeCondition };
 }
+
+export function scopeByClientIdFilter(user: AuthUser, baseFilter: Record<string, any> = {}) {
+  if (user.role === 'admin') return baseFilter;
+  const scopeCondition = { clientId: { $in: user.assignedClientIds } };
+  if ('clientId' in baseFilter) {
+    return { $and: [baseFilter, scopeCondition] };
+  }
+  return { ...baseFilter, ...scopeCondition };
+}

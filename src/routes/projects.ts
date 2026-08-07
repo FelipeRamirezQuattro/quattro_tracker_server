@@ -14,7 +14,10 @@ export function createProjectsRouter(env: Env): Router {
 
   router.get('/', requireRole('admin', 'user', 'final_user'), async (req, res) => {
     try {
-      const projects = await listProjects(req.authUser!);
+      const { clientId } = req.query;
+      const projects = await listProjects(req.authUser!, {
+        clientId: clientId ? String(clientId) : undefined,
+      });
       res.status(200).json({ success: true, data: projects });
     } catch (err) {
       res.status(500).json({ success: false, message: 'Contact the system administrator.' });

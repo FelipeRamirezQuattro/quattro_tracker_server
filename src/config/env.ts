@@ -9,6 +9,10 @@ export interface Env {
   emailFrom: string;
   emailPassword: string;
   bcryptCostFactor: number;
+  awsAccessKeyId: string;
+  awsSecretAccessKey: string;
+  awsRegion: string;
+  awsS3Bucket: string;
 }
 
 function required(name: string): string {
@@ -29,5 +33,9 @@ export function loadEnv(): Env {
     emailFrom: process.env.EMAIL_FROM || '',
     emailPassword: process.env.EMAIL_PASSWORD || '',
     bcryptCostFactor: Number(process.env.BCRYPT_COST_FACTOR || '12'),
+    awsAccessKeyId: process.env.AWS_ACCESS_KEY_ID || '',
+    awsSecretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || '',
+    awsRegion: process.env.AWS_REGION || '',
+    awsS3Bucket: process.env.AWS_S3_BUCKET || '',
   };
 }

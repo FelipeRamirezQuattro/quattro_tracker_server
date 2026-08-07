@@ -2,8 +2,24 @@ import mongoose from 'mongoose';
 import { Project } from '../db/models/Project';
 import { AuthUser, scopeProjectFilter } from './scope';
 
-export async function listProjects(user: AuthUser) {
-  return Project.find(scopeProjectFilter(user));
+// A final_user's portal account is tied to a client (assignedClientIds), not
+// individual projects (assignedProjectIds) — mirrors the same role-scoping
+// decision already made for Ticket (see scopeTicketFilter in ticketService.ts).
+// Without this, a final_user always sees zero projects from the default
+// assignedProjectIds-scoped query and can never pick a project to file a
+// ticket against. This is a narrow, additive bypass: it only applies when the
+// caller is a final_user AND explicitly passes a clientId that's in their own
+// assignedClientIds. Every other caller/shape keeps the original behavior.
+export async function listProjects(user: AuthUser, filters: { clientId?: string } = {}) {
+  if (user.role === 'final_user' && filters.clientId) {
+    if (!user.assignedClientIds.includes(filters.clientId)) return [];
+    // No explicit deletedAt filter needed: softDeletePlugin's pre(/^find/)
+    // hook already excludes soft-deleted documents from every find() call.
+    return Project.find({ clientId: filters.clientId });
+  }
+  const baseFilter: Record<string, any> = {};
+  if (filters.clientId) baseFilter.clientId = filters.clientId;
+  return Project.find(scopeProjectFilter(user, baseFilter));
 }
 
 export async function getProject(user: AuthUser, id: string) {

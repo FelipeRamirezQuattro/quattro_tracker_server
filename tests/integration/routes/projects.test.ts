@@ -327,6 +327,85 @@ describe('project routes', () => {
     expect(updateRes.body.data.status).toBe('on_hold');
   });
 
+  it('final_user requesting GET /api/projects?clientId=<their client> gets all of that client\'s projects, bypassing assignedProjectIds', async () => {
+    const app = createApp(testEnv);
+    const client = await Client.create({ name: 'Acme Co' });
+    const projectA = await Project.create({ clientId: client._id, name: 'Website' });
+    const projectB = await Project.create({ clientId: client._id, name: 'Mobile' });
+    const passwordHash = await hashPassword('pw', 4);
+    await User.create({
+      name: 'Contact',
+      username: 'contact',
+      passwordHash,
+      role: 'final_user',
+      assignedClientIds: [client._id],
+      assignedProjectIds: [],
+    });
+    const token = await loginAs(app, 'contact', 'pw');
+
+    const res = await request(app)
+      .get(`/api/projects?clientId=${client._id}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(2);
+    const names = res.body.data.map((p: any) => p.name).sort();
+    expect(names).toEqual([projectA.name, projectB.name].sort());
+  });
+
+  it('final_user requesting GET /api/projects?clientId=<a client not theirs> gets an empty list', async () => {
+    const app = createApp(testEnv);
+    const clientA = await Client.create({ name: 'Acme Co' });
+    const clientB = await Client.create({ name: 'Globex' });
+    await Project.create({ clientId: clientB._id, name: 'Mobile' });
+    const passwordHash = await hashPassword('pw', 4);
+    await User.create({
+      name: 'Contact',
+      username: 'contact',
+      passwordHash,
+      role: 'final_user',
+      assignedClientIds: [clientA._id],
+      assignedProjectIds: [],
+    });
+    const token = await loginAs(app, 'contact', 'pw');
+
+    const res = await request(app)
+      .get(`/api/projects?clientId=${clientB._id}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual([]);
+  });
+
+  it('admin calling GET /api/projects (no clientId) still gets all projects, unchanged', async () => {
+    const app = createApp(testEnv);
+    const client = await Client.create({ name: 'Acme Co' });
+    await Project.create({ clientId: client._id, name: 'Website' });
+    await Project.create({ clientId: client._id, name: 'Mobile' });
+    const passwordHash = await hashPassword('pw', 4);
+    await User.create({ name: 'Admin', username: 'admin', passwordHash, role: 'admin' });
+    const token = await loginAs(app, 'admin', 'pw');
+
+    const res = await request(app).get('/api/projects').set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(2);
+  });
+
+  it('user role calling GET /api/projects (no clientId) is still scoped to assignedProjectIds, unchanged', async () => {
+    const app = createApp(testEnv);
+    const client = await Client.create({ name: 'Acme Co' });
+    const visibleProject = await Project.create({ clientId: client._id, name: 'Visible' });
+    await Project.create({ clientId: client._id, name: 'Hidden' });
+    const passwordHash = await hashPassword('pw', 4);
+    await User.create({
+      name: 'Employee', username: 'employee', passwordHash, role: 'user', assignedProjectIds: [visibleProject._id],
+    });
+    const token = await loginAs(app, 'employee', 'pw');
+
+    const res = await request(app).get('/api/projects').set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(1);
+    expect(res.body.data[0].name).toBe('Visible');
+  });
+
   it('final_user cannot delete a project', async () => {
     const app = createApp(testEnv);
     const client = await Client.create({ name: 'Test Co' });

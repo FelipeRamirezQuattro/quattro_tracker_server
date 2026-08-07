@@ -11,6 +11,8 @@ import { createSprintsRouter } from './routes/sprints';
 import { createTasksRouter } from './routes/tasks';
 import { createTimeEntriesRouter } from './routes/timeEntries';
 import { createReportsRouter } from './routes/reports';
+import { createTicketsRouter } from './routes/tickets';
+import { createFilesRouter } from './routes/files';
 
 export function createApp(env: Env): express.Express {
   const app = express();
@@ -31,6 +33,8 @@ export function createApp(env: Env): express.Express {
   app.use('/api/tasks', createTasksRouter(env));
   app.use('/api/time-entries', createTimeEntriesRouter(env));
   app.use('/api/reports', createReportsRouter(env));
+  app.use('/api/tickets', createTicketsRouter(env));
+  app.use('/api/files', createFilesRouter(env));
 
   return app;
 }
