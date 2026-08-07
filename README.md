@@ -22,22 +22,26 @@ Copy `.env.example` to `.env` and fill in real values before running
 ### Phase 0 — Authentication, Clients, Projects, Users
 
 **Auth**
-- `POST /api/auth/login` — Authenticate user and receive JWT token
-- `POST /api/auth/logout` — Invalidate user session
-- `POST /api/auth/refresh` — Refresh JWT token
+- `POST /api/auth/login` — Authenticate user and receive an access token (sets refresh-token cookie)
+- `POST /api/auth/refresh` — Exchange the refresh-token cookie for a new access token
+- `POST /api/auth/logout` — Invalidate the current refresh token
+- `GET /api/auth/me` — Retrieve the authenticated user's profile (authenticated)
+- `PUT /api/auth/change-password` — Change the authenticated user's own password (authenticated)
+- `POST /api/auth/reset-password/request` — Request a password-reset token by username/email
+- `POST /api/auth/reset-password/confirm` — Confirm a password reset using a reset token
 
 **Clients** (CRUD)
-- `GET /api/clients` — List all clients (admin/user)
+- `GET /api/clients` — List all clients (admin, user, final_user)
 - `POST /api/clients` — Create new client (admin)
-- `GET /api/clients/:id` — Retrieve specific client (admin/user)
-- `PUT /api/clients/:id` — Update client (admin/user)
+- `GET /api/clients/:id` — Retrieve specific client (admin, user, final_user)
+- `PUT /api/clients/:id` — Update client (admin, user)
 - `DELETE /api/clients/:id` — Delete client (admin)
 
 **Projects** (CRUD)
-- `GET /api/projects` — List all projects (admin/user/final_user)
+- `GET /api/projects` — List all projects (admin, user, final_user)
 - `POST /api/projects` — Create new project (admin)
-- `GET /api/projects/:id` — Retrieve specific project (admin/user/final_user)
-- `PUT /api/projects/:id` — Update project (admin/user)
+- `GET /api/projects/:id` — Retrieve specific project (admin, user, final_user)
+- `PUT /api/projects/:id` — Update project (admin, user)
 - `DELETE /api/projects/:id` — Delete project (admin)
 
 **Users** (CRUD)
@@ -49,45 +53,42 @@ Copy `.env.example` to `.env` and fill in real values before running
 
 ### Phase 1 — Scrum Core (Epics, Sprints, Tasks, Subtasks)
 
-**Epics** (CRUD)
-- `GET /api/epics` — List all epics (admin/user)
-- `POST /api/epics` — Create new epic (admin/user)
-- `GET /api/epics/:id` — Retrieve specific epic (admin/user)
-- `PUT /api/epics/:id` — Update epic (admin/user)
-- `DELETE /api/epics/:id` — Delete epic (admin)
+There is no standalone `/api/epics` or `/api/sprints` list/create route — epics
+and sprints are always listed/created nested under their project
+(`/api/projects/:projectId/epics`, `/api/projects/:projectId/sprints`). Once
+created, an individual epic/sprint can be read/updated/deleted via the flat
+`/api/epics/:id` / `/api/sprints/:id` routes below.
 
-**Project Epics** (nested routes, CRUD)
-- `GET /api/projects/:projectId/epics` — List epics for project (admin/user/final_user)
-- `POST /api/projects/:projectId/epics` — Create epic in project (admin/user)
-- `GET /api/projects/:projectId/epics/:epicId` — Retrieve project epic (admin/user/final_user)
-- `PUT /api/projects/:projectId/epics/:epicId` — Update project epic (admin/user)
-- `DELETE /api/projects/:projectId/epics/:epicId` — Delete project epic (admin)
+`final_user` has no access to any Epic, Sprint, Task, or SubTask route — every
+route for these four entities requires `admin` or `user`.
 
-**Sprints** (CRUD)
-- `GET /api/sprints` — List all sprints (admin/user)
-- `POST /api/sprints` — Create new sprint (admin/user)
-- `GET /api/sprints/:id` — Retrieve specific sprint (admin/user)
-- `PUT /api/sprints/:id` — Update sprint (admin/user)
-- `DELETE /api/sprints/:id` — Delete sprint (admin)
+**Project Epics** (nested routes)
+- `GET /api/projects/:projectId/epics` — List epics for project (admin, user)
+- `POST /api/projects/:projectId/epics` — Create epic in project (admin, user)
 
-**Project Sprints** (nested routes, CRUD)
-- `GET /api/projects/:projectId/sprints` — List sprints for project (admin/user/final_user)
-- `POST /api/projects/:projectId/sprints` — Create sprint in project (admin/user)
-- `GET /api/projects/:projectId/sprints/:sprintId` — Retrieve project sprint (admin/user/final_user)
-- `PUT /api/projects/:projectId/sprints/:sprintId` — Update project sprint (admin/user)
-- `DELETE /api/projects/:projectId/sprints/:sprintId` — Delete project sprint (admin)
+**Epics** (flat routes, by epic id)
+- `GET /api/epics/:id` — Retrieve specific epic (admin, user)
+- `PUT /api/epics/:id` — Update epic (admin, user)
+- `DELETE /api/epics/:id` — Delete epic (admin, user)
+
+**Project Sprints** (nested routes)
+- `GET /api/projects/:projectId/sprints` — List sprints for project (admin, user)
+- `POST /api/projects/:projectId/sprints` — Create sprint in project (admin, user)
+
+**Sprints** (flat routes, by sprint id)
+- `GET /api/sprints/:id` — Retrieve specific sprint (admin, user)
+- `PUT /api/sprints/:id` — Update sprint (admin, user)
+- `DELETE /api/sprints/:id` — Delete sprint (admin, user)
 
 **Tasks** (CRUD)
-- `GET /api/tasks` — List all tasks (admin/user)
-- `POST /api/tasks` — Create new task (admin/user)
-- `GET /api/tasks/:id` — Retrieve specific task (admin/user)
-- `PUT /api/tasks/:id` — Update task (admin/user)
-- `DELETE /api/tasks/:id` — Delete task (admin)
-- `POST /api/tasks/:id/status` — Update task status (admin/user)
+- `GET /api/tasks` — List tasks for a project (`projectId` query param required; optional `status`, `sprintId`, `epicId`, `assigneeId` filters) (admin, user)
+- `POST /api/tasks` — Create new task (admin, user)
+- `GET /api/tasks/:id` — Retrieve specific task (admin, user)
+- `PUT /api/tasks/:id` — Update task (any field except `status`, which is ignored here — see the status route below) (admin, user)
+- `DELETE /api/tasks/:id` — Delete task (admin, user)
+- `PUT /api/tasks/:id/status` — Transition task status through the workflow matrix, enforcing the Definition-of-Ready gate when leaving `backlog` (admin, user)
 
-**Subtasks** (nested under tasks, CRUD)
-- `GET /api/tasks/:taskId/subtasks` — List subtasks for task (admin/user/final_user)
-- `POST /api/tasks/:taskId/subtasks` — Create subtask (admin/user)
-- `GET /api/tasks/:taskId/subtasks/:subtaskId` — Retrieve specific subtask (admin/user/final_user)
-- `PUT /api/tasks/:taskId/subtasks/:subtaskId` — Update subtask (admin/user)
-- `DELETE /api/tasks/:taskId/subtasks/:subtaskId` — Delete subtask (admin)
+**Subtasks** (embedded in the parent task's document — no standalone GET route; read them as part of `GET /api/tasks/:id`)
+- `POST /api/tasks/:id/subtasks` — Add a subtask to a task (admin, user)
+- `PUT /api/tasks/:id/subtasks/:subId` — Update a subtask (admin, user)
+- `DELETE /api/tasks/:id/subtasks/:subId` — Delete a subtask (admin, user)
