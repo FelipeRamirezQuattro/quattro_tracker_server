@@ -4,6 +4,7 @@ import { requireAuth } from '../middlewares/requireAuth';
 import { requireRole } from '../middlewares/requireRole';
 import { listTasks, getTask, createTask, updateTask, deleteTask } from '../services/taskService';
 import { addSubtask, updateSubtask, deleteSubtask } from '../services/subtaskService';
+import { transitionTaskStatus, InvalidTransitionError, DefinitionOfReadyError } from '../services/taskStatusService';
 
 // This router is mounted flat at /api/tasks (not nested under
 // createProjectsRouter like the epic/sprint sub-routers), so nothing else
@@ -124,6 +125,23 @@ export function createTasksRouter(env: Env): Router {
       }
       res.status(200).json({ success: true, data: task });
     } catch {
+      res.status(500).json({ success: false, message: 'Contact the system administrator.' });
+    }
+  });
+
+  router.put('/:id/status', requireRole('admin', 'user'), async (req, res) => {
+    try {
+      const task = await transitionTaskStatus(req.authUser!, String(req.params.id), req.body.status);
+      if (!task) {
+        res.status(404).json({ success: false, message: 'Task not found' });
+        return;
+      }
+      res.status(200).json({ success: true, data: task });
+    } catch (err) {
+      if (err instanceof InvalidTransitionError || err instanceof DefinitionOfReadyError) {
+        res.status(400).json({ success: false, message: (err as Error).message });
+        return;
+      }
       res.status(500).json({ success: false, message: 'Contact the system administrator.' });
     }
   });
