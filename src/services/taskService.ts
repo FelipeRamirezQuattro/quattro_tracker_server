@@ -1,5 +1,7 @@
 import mongoose from 'mongoose';
 import { Task } from '../db/models/Task';
+import { Epic } from '../db/models/Epic';
+import { Sprint } from '../db/models/Sprint';
 import { AuthUser, scopeByProjectIdFilter } from './scope';
 import { getProject } from './projectService';
 import { nextRank } from '../helpers/rank';
@@ -37,6 +39,16 @@ export async function createTask(user: AuthUser, data: any) {
   if (!project) return null;
 
   const { title, description, epicId, sprintId, priority, assigneeId, storyPoints, labels, dueDate } = data;
+
+  if (epicId !== undefined && epicId !== null) {
+    const epic = await Epic.findOne({ _id: epicId, projectId: project._id });
+    if (!epic) return null;
+  }
+  if (sprintId !== undefined && sprintId !== null) {
+    const sprint = await Sprint.findOne({ _id: sprintId, projectId: project._id });
+    if (!sprint) return null;
+  }
+
   const maxRankDoc = await Task.findOne({ projectId: project._id, status: 'backlog' }).sort({ rank: -1 });
 
   return Task.create({
@@ -62,7 +74,21 @@ export async function createTask(user: AuthUser, data: any) {
 export async function updateTask(user: AuthUser, id: string, data: any) {
   try {
     const objectId = new mongoose.Types.ObjectId(id);
+    const filter = scopeByProjectIdFilter(user, { _id: objectId });
+    const existingTask = await Task.findOne(filter);
+    if (!existingTask) return null;
+
     const { title, description, epicId, sprintId, priority, assigneeId, storyPoints, labels, dueDate, isBlocked, rank } = data;
+
+    if (epicId !== undefined && epicId !== null) {
+      const epic = await Epic.findOne({ _id: epicId, projectId: existingTask.projectId });
+      if (!epic) return null;
+    }
+    if (sprintId !== undefined && sprintId !== null) {
+      const sprint = await Sprint.findOne({ _id: sprintId, projectId: existingTask.projectId });
+      if (!sprint) return null;
+    }
+
     const allowlisted: Record<string, any> = {};
     if (title !== undefined) allowlisted.title = title;
     if (description !== undefined) allowlisted.description = description;
@@ -75,7 +101,6 @@ export async function updateTask(user: AuthUser, id: string, data: any) {
     if (dueDate !== undefined) allowlisted.dueDate = dueDate;
     if (isBlocked !== undefined) allowlisted.isBlocked = isBlocked;
     if (rank !== undefined) allowlisted.rank = rank;
-    const filter = scopeByProjectIdFilter(user, { _id: objectId });
     return await Task.findOneAndUpdate(filter, allowlisted, { returnDocument: 'after' });
   } catch {
     return null;
