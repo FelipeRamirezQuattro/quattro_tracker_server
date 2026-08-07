@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import mongoose from 'mongoose';
 import { Env } from '../config/env';
 import { requireAuth } from '../middlewares/requireAuth';
 import { requireRole } from '../middlewares/requireRole';
@@ -33,7 +34,11 @@ export function createProjectEpicsRouter(): Router {
         return;
       }
       res.status(201).json({ success: true, data: epic });
-    } catch {
+    } catch (err) {
+      if (err instanceof mongoose.Error.ValidationError) {
+        res.status(400).json({ success: false, message: err.message });
+        return;
+      }
       res.status(500).json({ success: false, message: 'Contact the system administrator.' });
     }
   });

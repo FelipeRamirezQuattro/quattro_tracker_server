@@ -8,21 +8,26 @@ async function loadScopedTask(user: AuthUser, taskId: string) {
 }
 
 export async function addSubtask(user: AuthUser, taskId: string, data: any) {
+  // Only the task lookup (which includes parsing taskId as an ObjectId) is
+  // treated as "not found" -> null. A mongoose.Error.ValidationError thrown
+  // by task.save() below (e.g. a subtask missing its required title) is
+  // intentionally allowed to propagate so the route can map it to a 400.
+  let task;
   try {
-    const task = await loadScopedTask(user, taskId);
-    if (!task) return null;
-    const { title, assigneeId, storyPoints } = data;
-    task.subtasks.push({
-      title,
-      assigneeId: assigneeId || null,
-      storyPoints: storyPoints ?? null,
-      status: 'backlog',
-    } as any);
-    await task.save();
-    return task;
+    task = await loadScopedTask(user, taskId);
   } catch {
     return null;
   }
+  if (!task) return null;
+  const { title, assigneeId, storyPoints } = data;
+  task.subtasks.push({
+    title,
+    assigneeId: assigneeId || null,
+    storyPoints: storyPoints ?? null,
+    status: 'backlog',
+  } as any);
+  await task.save();
+  return task;
 }
 
 export async function updateSubtask(user: AuthUser, taskId: string, subtaskId: string, data: any) {

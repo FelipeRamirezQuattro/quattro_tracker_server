@@ -55,6 +55,24 @@ describe('epics routes', () => {
     expect(listRes.body.data).toHaveLength(1);
   });
 
+  it('rejects an epic missing a title with a 400, not a 500', async () => {
+    const passwordHash = await hashPassword('x', 4);
+    const admin = await User.create({ name: 'Admin', username: 'admin', passwordHash, role: 'admin' });
+    const client = await Client.create({ name: 'Acme' });
+    const project = await Project.create({ clientId: client._id, name: 'Website' });
+    const auth = await authHeaderFor(admin);
+
+    const res = await request(app)
+      .post(`/api/projects/${project._id}/epics`)
+      .set('Authorization', auth)
+      .send({});
+
+    expect(res.status).toBe(400);
+    expect(res.body.success).toBe(false);
+    expect(typeof res.body.message).toBe('string');
+    expect(res.body.message.length).toBeGreaterThan(0);
+  });
+
   it('blocks a final_user from any epic route', async () => {
     const passwordHash = await hashPassword('x', 4);
     const client = await Client.create({ name: 'Acme' });

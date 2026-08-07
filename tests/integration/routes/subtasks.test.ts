@@ -66,4 +66,28 @@ describe('subtask routes', () => {
       .set('Authorization', auth);
     expect(deleteRes.body.data.subtasks).toHaveLength(0);
   });
+
+  it('rejects a subtask missing a title with a 400, not a 500 or a 404', async () => {
+    const passwordHash = await hashPassword('x', 4);
+    const admin = await User.create({ name: 'Admin', username: 'admin', passwordHash, role: 'admin' });
+    const client = await Client.create({ name: 'Acme' });
+    const project = await Project.create({ clientId: client._id, name: 'Website' });
+    const auth = await authHeaderFor(admin);
+
+    const taskRes = await request(app)
+      .post('/api/tasks')
+      .set('Authorization', auth)
+      .send({ projectId: project._id, title: 'Parent task' });
+    const taskId = taskRes.body.data._id;
+
+    const res = await request(app)
+      .post(`/api/tasks/${taskId}/subtasks`)
+      .set('Authorization', auth)
+      .send({});
+
+    expect(res.status).toBe(400);
+    expect(res.body.success).toBe(false);
+    expect(typeof res.body.message).toBe('string');
+    expect(res.body.message.length).toBeGreaterThan(0);
+  });
 });

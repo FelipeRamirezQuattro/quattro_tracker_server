@@ -62,7 +62,10 @@ describe('sprints routes', () => {
       .set('Authorization', auth)
       .send({ name: 'No dates' });
 
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(400);
+    expect(res.body.success).toBe(false);
+    expect(typeof res.body.message).toBe('string');
+    expect(res.body.message.length).toBeGreaterThan(0);
   });
 
   it('hides a sprint from a user scoped to a different project via the flat /api/sprints/:id route', async () => {
