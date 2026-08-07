@@ -32,3 +32,12 @@ export function scopeByProjectIdFilter(user: AuthUser, baseFilter: Record<string
   }
   return { ...baseFilter, ...scopeCondition };
 }
+
+export function scopeOwnUserFilter(user: AuthUser, baseFilter: Record<string, any> = {}) {
+  if (user.role === 'admin') return baseFilter;
+  const scopeCondition = { userId: user.id };
+  if ('userId' in baseFilter) {
+    return { $and: [baseFilter, scopeCondition] };
+  }
+  return { ...baseFilter, ...scopeCondition };
+}

@@ -9,6 +9,8 @@ import { createUsersRouter } from './routes/users';
 import { createEpicsRouter } from './routes/epics';
 import { createSprintsRouter } from './routes/sprints';
 import { createTasksRouter } from './routes/tasks';
+import { createTimeEntriesRouter } from './routes/timeEntries';
+import { createReportsRouter } from './routes/reports';
 
 export function createApp(env: Env): express.Express {
   const app = express();
@@ -27,6 +29,8 @@ export function createApp(env: Env): express.Express {
   app.use('/api/epics', createEpicsRouter(env));
   app.use('/api/sprints', createSprintsRouter(env));
   app.use('/api/tasks', createTasksRouter(env));
+  app.use('/api/time-entries', createTimeEntriesRouter(env));
+  app.use('/api/reports', createReportsRouter(env));
 
   return app;
 }
