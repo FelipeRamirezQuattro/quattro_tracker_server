@@ -3,6 +3,7 @@ import { Env } from '../config/env';
 import { requireAuth } from '../middlewares/requireAuth';
 import { requireRole } from '../middlewares/requireRole';
 import { listProjects, getProject, createProject, updateProject, deleteProject } from '../services/projectService';
+import { HasDependentRecordsError } from '../services/errors';
 import { createProjectEpicsRouter } from './epics';
 import { createProjectSprintsRouter } from './sprints';
 
@@ -64,6 +65,10 @@ export function createProjectsRouter(env: Env): Router {
       await deleteProject(String(req.params.id));
       res.status(200).json({ success: true });
     } catch (err) {
+      if (err instanceof HasDependentRecordsError) {
+        res.status(409).json({ success: false, message: err.message });
+        return;
+      }
       res.status(500).json({ success: false, message: 'Contact the system administrator.' });
     }
   });

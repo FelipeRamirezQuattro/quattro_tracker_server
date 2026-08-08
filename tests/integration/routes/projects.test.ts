@@ -5,6 +5,8 @@ import { createApp } from '../../../src/app';
 import { User } from '../../../src/db/models/User';
 import { Client } from '../../../src/db/models/Client';
 import { Project } from '../../../src/db/models/Project';
+import { Task } from '../../../src/db/models/Task';
+import { Ticket } from '../../../src/db/models/Ticket';
 import { hashPassword } from '../../../src/helpers/password';
 
 const testEnv = {
@@ -26,7 +28,8 @@ describe('project routes', () => {
   afterEach(clearTestDb);
   afterAll(closeTestDb);
 
-  it('admin can create and list projects', async () => {
+  describe('basic CRUD and list operations', () => {
+    it('admin can create and list projects', async () => {
     const app = createApp(testEnv);
     const client = await Client.create({ name: 'Acme Co' });
     const passwordHash = await hashPassword('pw', 4);
@@ -428,5 +431,76 @@ describe('project routes', () => {
       .delete(`/api/projects/${project._id}`)
       .set('Authorization', `Bearer ${token}`);
     expect(res.status).toBe(403);
+  });
+  });
+
+  describe('project delete guard', () => {
+    it('rejects deleting a project that still has a non-deleted task', async () => {
+      const app = createApp(testEnv);
+      const passwordHash = await hashPassword('pw', 4);
+      const admin = await User.create({ name: 'Admin', username: 'admin', passwordHash, role: 'admin' });
+      const token = await loginAs(app, 'admin', 'pw');
+
+      const client = await Client.create({ name: 'Acme Co' });
+      const project = await Project.create({ clientId: client._id, name: 'Website' });
+      await Task.create({ projectId: project._id, title: 'Do the thing', reporterId: admin._id, rank: 1000 });
+
+      const deleteRes = await request(app)
+        .delete(`/api/projects/${project._id}`)
+        .set('Authorization', `Bearer ${token}`);
+
+      expect(deleteRes.status).toBe(409);
+    });
+
+    it('rejects deleting a project that still has a non-deleted ticket', async () => {
+      const app = createApp(testEnv);
+      const passwordHash = await hashPassword('pw', 4);
+      await User.create({ name: 'Admin', username: 'admin', passwordHash, role: 'admin' });
+      const token = await loginAs(app, 'admin', 'pw');
+
+      const client = await Client.create({ name: 'Acme Co' });
+      const project = await Project.create({ clientId: client._id, name: 'Website' });
+      await Ticket.create({ clientId: client._id, projectId: project._id, subject: 'Help' });
+
+      const deleteRes = await request(app)
+        .delete(`/api/projects/${project._id}`)
+        .set('Authorization', `Bearer ${token}`);
+
+      expect(deleteRes.status).toBe(409);
+    });
+
+    it('allows deleting a project with no tasks or tickets', async () => {
+      const app = createApp(testEnv);
+      const passwordHash = await hashPassword('pw', 4);
+      await User.create({ name: 'Admin', username: 'admin', passwordHash, role: 'admin' });
+      const token = await loginAs(app, 'admin', 'pw');
+
+      const client = await Client.create({ name: 'Acme Co' });
+      const project = await Project.create({ clientId: client._id, name: 'Website' });
+
+      const deleteRes = await request(app)
+        .delete(`/api/projects/${project._id}`)
+        .set('Authorization', `Bearer ${token}`);
+
+      expect(deleteRes.status).toBe(200);
+    });
+
+    it('allows deleting a project once its tasks and tickets are all soft-deleted', async () => {
+      const app = createApp(testEnv);
+      const passwordHash = await hashPassword('pw', 4);
+      const admin = await User.create({ name: 'Admin', username: 'admin', passwordHash, role: 'admin' });
+      const token = await loginAs(app, 'admin', 'pw');
+
+      const client = await Client.create({ name: 'Acme Co' });
+      const project = await Project.create({ clientId: client._id, name: 'Website' });
+      await Task.create({ projectId: project._id, title: 'Do the thing', reporterId: admin._id, rank: 1000, deletedAt: new Date() });
+      await Ticket.create({ clientId: client._id, projectId: project._id, subject: 'Help', deletedAt: new Date() });
+
+      const deleteRes = await request(app)
+        .delete(`/api/projects/${project._id}`)
+        .set('Authorization', `Bearer ${token}`);
+
+      expect(deleteRes.status).toBe(200);
+    });
   });
 });

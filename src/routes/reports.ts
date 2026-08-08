@@ -3,7 +3,7 @@ import mongoose from 'mongoose';
 import { Env } from '../config/env';
 import { requireAuth } from '../middlewares/requireAuth';
 import { requireRole } from '../middlewares/requireRole';
-import { reportByProject, reportByClient, reportByUser, reportTimeline } from '../services/reportService';
+import { reportByProject, reportByClient, reportByUser, reportTimeline, reportVelocity } from '../services/reportService';
 
 // reportService's exported functions all call `new mongoose.Types.ObjectId(id)`
 // and `new Date(...)` directly, outside any try/catch — an invalid id or date
@@ -121,6 +121,24 @@ export function createReportsRouter(env: Env): Router {
         granularity as 'day' | 'week' | 'month'
       );
       res.status(200).json({ success: true, data: timeline });
+    } catch {
+      res.status(500).json({ success: false, message: 'Contact the system administrator.' });
+    }
+  });
+
+  router.get('/velocity', async (req, res) => {
+    try {
+      const { projectId } = req.query;
+      if (!projectId) {
+        res.status(400).json({ success: false, message: 'projectId is required' });
+        return;
+      }
+      if (!mongoose.isValidObjectId(String(projectId))) {
+        res.status(400).json({ success: false, message: 'projectId is not a valid id' });
+        return;
+      }
+      const velocity = await reportVelocity(String(projectId));
+      res.status(200).json({ success: true, data: velocity });
     } catch {
       res.status(500).json({ success: false, message: 'Contact the system administrator.' });
     }

@@ -58,6 +58,45 @@ describe('client routes', () => {
     expect(listAfterDelete.body.data).toHaveLength(0);
   });
 
+  it('rejects deleting a client that still has a non-deleted project', async () => {
+    const app = createApp(testEnv);
+    const passwordHash = await hashPassword('pw', 4);
+    await User.create({ name: 'Admin', username: 'admin', passwordHash, role: 'admin' });
+    const token = await loginAs(app, 'admin', 'pw');
+
+    const client = await Client.create({ name: 'Acme Co' });
+    const { Project } = await import('../../../src/db/models/Project');
+    await Project.create({ clientId: client._id, name: 'Website' });
+
+    const deleteRes = await request(app)
+      .delete(`/api/clients/${client._id}`)
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(deleteRes.status).toBe(409);
+    expect(deleteRes.body.success).toBe(false);
+
+    const stillThere = await Client.findById(client._id);
+    expect(stillThere).not.toBeNull();
+    expect(stillThere!.deletedAt).toBeNull();
+  });
+
+  it('allows deleting a client once its projects are all soft-deleted', async () => {
+    const app = createApp(testEnv);
+    const passwordHash = await hashPassword('pw', 4);
+    await User.create({ name: 'Admin', username: 'admin', passwordHash, role: 'admin' });
+    const token = await loginAs(app, 'admin', 'pw');
+
+    const client = await Client.create({ name: 'Acme Co' });
+    const { Project } = await import('../../../src/db/models/Project');
+    await Project.create({ clientId: client._id, name: 'Website', deletedAt: new Date() });
+
+    const deleteRes = await request(app)
+      .delete(`/api/clients/${client._id}`)
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(deleteRes.status).toBe(200);
+  });
+
   it('final_user only sees their assigned clients', async () => {
     const app = createApp(testEnv);
     const passwordHash = await hashPassword('pw', 4);

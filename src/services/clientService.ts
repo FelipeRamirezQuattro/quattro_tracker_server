@@ -1,6 +1,8 @@
 import mongoose from 'mongoose';
 import { Client } from '../db/models/Client';
+import { Project } from '../db/models/Project';
 import { AuthUser, scopeClientFilter } from './scope';
+import { HasDependentRecordsError } from './errors';
 
 export async function listClients(user: AuthUser) {
   return Client.find(scopeClientFilter(user));
@@ -44,5 +46,11 @@ export async function updateClient(user: AuthUser, id: string, data: any) {
 }
 
 export async function deleteClient(id: string) {
+  const hasProjects = await Project.exists({ clientId: id });
+  if (hasProjects) {
+    throw new HasDependentRecordsError(
+      'Cannot delete a client that still has projects. Archive or delete its projects first.'
+    );
+  }
   return Client.findByIdAndUpdate(id, { deletedAt: new Date() }, { returnDocument: 'after' });
 }

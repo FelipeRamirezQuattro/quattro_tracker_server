@@ -3,6 +3,7 @@ import { Env } from '../config/env';
 import { requireAuth } from '../middlewares/requireAuth';
 import { requireRole } from '../middlewares/requireRole';
 import { listClients, getClient, createClient, updateClient, deleteClient } from '../services/clientService';
+import { HasDependentRecordsError } from '../services/errors';
 
 export function createClientsRouter(env: Env): Router {
   const router = Router();
@@ -57,6 +58,10 @@ export function createClientsRouter(env: Env): Router {
       await deleteClient(String(req.params.id));
       res.status(200).json({ success: true });
     } catch (err) {
+      if (err instanceof HasDependentRecordsError) {
+        res.status(409).json({ success: false, message: err.message });
+        return;
+      }
       res.status(500).json({ success: false, message: 'Contact the system administrator.' });
     }
   });

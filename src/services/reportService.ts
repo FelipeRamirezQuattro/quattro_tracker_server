@@ -2,6 +2,8 @@ import mongoose from 'mongoose';
 import { TimeEntry } from '../db/models/TimeEntry';
 import { User } from '../db/models/User';
 import { toDayDate } from '../helpers/date';
+import { Sprint } from '../db/models/Sprint';
+import { Task } from '../db/models/Task';
 
 interface DateRange {
   from: string;
@@ -133,4 +135,27 @@ export async function reportTimeline(
     { $sort: { _id: 1 } },
     { $project: { _id: 0, bucket: '$_id', totalMinutes: 1 } },
   ]);
+}
+
+export async function reportVelocity(projectId: string) {
+  const sprints = await Sprint.find({
+    projectId: new mongoose.Types.ObjectId(projectId),
+    status: 'completed',
+  }).sort({ endDate: 1 });
+
+  const results = await Promise.all(
+    sprints.map(async (sprint) => {
+      const rows = await Task.aggregate([
+        { $match: { sprintId: sprint._id, status: 'done', deletedAt: null } },
+        { $group: { _id: null, totalPoints: { $sum: { $ifNull: ['$storyPoints', 0] } } } },
+      ]);
+      return {
+        sprintId: String(sprint._id),
+        sprintName: sprint.name,
+        completedPoints: rows[0]?.totalPoints ?? 0,
+      };
+    })
+  );
+
+  return results;
 }

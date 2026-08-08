@@ -1,5 +1,8 @@
 import mongoose from 'mongoose';
 import { Project } from '../db/models/Project';
+import { Task } from '../db/models/Task';
+import { Ticket } from '../db/models/Ticket';
+import { HasDependentRecordsError } from './errors';
 import { AuthUser, scopeProjectFilter } from './scope';
 
 // A final_user's portal account is tied to a client (assignedClientIds), not
@@ -59,5 +62,14 @@ export async function updateProject(user: AuthUser, id: string, data: any) {
 }
 
 export async function deleteProject(id: string) {
+  const [hasTasks, hasTickets] = await Promise.all([
+    Task.exists({ projectId: id }),
+    Ticket.exists({ projectId: id }),
+  ]);
+  if (hasTasks || hasTickets) {
+    throw new HasDependentRecordsError(
+      'Cannot delete a project that still has tasks or tickets. Archive or delete them first.'
+    );
+  }
   return Project.findByIdAndUpdate(id, { deletedAt: new Date() }, { returnDocument: 'after' });
 }

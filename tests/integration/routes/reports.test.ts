@@ -107,4 +107,35 @@ describe('reports routes', () => {
       .set('Authorization', auth);
     expect(res.status).toBe(400);
   });
+
+  it('returns a velocity report for an admin', async () => {
+    const passwordHash = await hashPassword('x', 4);
+    const admin = await User.create({ name: 'Admin', username: 'admin', passwordHash, role: 'admin' });
+    const client = await Client.create({ name: 'Acme' });
+    const project = await Project.create({ clientId: client._id, name: 'Website' });
+    const auth = await authHeaderFor(admin);
+
+    const res = await request(app)
+      .get('/api/reports/velocity')
+      .query({ projectId: String(project._id) })
+      .set('Authorization', auth);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual([]);
+  });
+
+  it('rejects a velocity request from a non-admin', async () => {
+    const passwordHash = await hashPassword('x', 4);
+    const user = await User.create({ name: 'Employee', username: 'emp', passwordHash, role: 'user' });
+    const client = await Client.create({ name: 'Acme' });
+    const project = await Project.create({ clientId: client._id, name: 'Website' });
+    const auth = await authHeaderFor(user);
+
+    const res = await request(app)
+      .get('/api/reports/velocity')
+      .query({ projectId: String(project._id) })
+      .set('Authorization', auth);
+
+    expect(res.status).toBe(403);
+  });
 });
