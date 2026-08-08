@@ -8,7 +8,11 @@
     "build": "tsc --build tsconfig.build.json",
     "dev": "ts-node-dev --respawn src/index.ts",
     "test": "jest --runInBand",
-    "seed": "ts-node src/scripts/seed.ts"
+    "seed": "ts-node src/scripts/seed.ts",
+    "pm2:start": "npm run build && pm2 start ecosystem.config.js",
+    "pm2:restart": "npm run build && pm2 restart ecosystem.config.js",
+    "pm2:stop": "pm2 stop ecosystem.config.js",
+    "pm2:logs": "pm2 logs quattro-tracker-server"
   },
   "keywords": [],
   "author": "",
